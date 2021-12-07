@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -173,10 +172,10 @@ func TestParentBasedDefaultDescription(t *testing.T) {
 		NeverSample().Description())
 
 	if sampler.Description() != expectedDescription {
-		t.Error(fmt.Sprintf("Sampler description should be %s, got '%s' instead",
+		t.Errorf("Sampler description should be %s, got '%s' instead",
 			expectedDescription,
 			sampler.Description(),
-		))
+		)
 	}
 
 }
@@ -240,7 +239,7 @@ func TestTracestateIsPassed(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			traceState, err := trace.TraceStateFromKeyValues(attribute.String("k", "v"))
+			traceState, err := trace.ParseTraceState("k=v")
 			if err != nil {
 				t.Error(err)
 			}

@@ -23,10 +23,9 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	otelbaggage "go.opentelemetry.io/otel/internal/baggage"
-	"go.opentelemetry.io/otel/trace"
-
+	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/bridge/opentracing/internal"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type mixedAPIsTestCase struct {
@@ -42,7 +41,6 @@ func getMixedAPIsTestCases() []mixedAPIsTestCase {
 	cast := newCurrentActiveSpanTest()
 	coin := newContextIntactTest()
 	bip := newBaggageItemsPreservationTest()
-	tm := newTracerMessTest()
 	bio := newBaggageInteroperationTest()
 
 	return []mixedAPIsTestCase{
@@ -93,18 +91,6 @@ func getMixedAPIsTestCases() []mixedAPIsTestCase {
 			setup: bip.setup,
 			run:   bip.runOTOtelOT,
 			check: bip.check,
-		},
-		{
-			desc:  "consistent tracers otel -> ot -> otel",
-			setup: tm.setup,
-			run:   tm.runOtelOTOtel,
-			check: tm.check,
-		},
-		{
-			desc:  "consistent tracers ot -> otel -> ot",
-			setup: tm.setup,
-			run:   tm.runOTOtelOT,
-			check: tm.check,
 		},
 		{
 			desc:  "baggage items interoperation across layers ot -> otel -> ot",
@@ -419,67 +405,6 @@ func (bip *baggageItemsPreservationTest) addAndRecordBaggage(t *testing.T, ctx c
 	return ctx
 }
 
-// tracer mess test
-
-type tracerMessTest struct {
-	recordedOTSpanTracers   []ot.Tracer
-	recordedOtelSpanTracers []trace.Tracer
-}
-
-func newTracerMessTest() *tracerMessTest {
-	return &tracerMessTest{
-		recordedOTSpanTracers:   nil,
-		recordedOtelSpanTracers: nil,
-	}
-}
-
-func (tm *tracerMessTest) setup(t *testing.T, tracer *internal.MockTracer) {
-	tm.recordedOTSpanTracers = nil
-	tm.recordedOtelSpanTracers = nil
-}
-
-func (tm *tracerMessTest) check(t *testing.T, tracer *internal.MockTracer) {
-	globalOtTracer := ot.GlobalTracer()
-	globalOtelTracer := otel.Tracer("")
-	if len(tm.recordedOTSpanTracers) != 3 {
-		t.Errorf("Expected 3 recorded OpenTracing tracers from spans, got %d", len(tm.recordedOTSpanTracers))
-	}
-	if len(tm.recordedOtelSpanTracers) != 3 {
-		t.Errorf("Expected 3 recorded OpenTelemetry tracers from spans, got %d", len(tm.recordedOtelSpanTracers))
-	}
-	for idx, tracer := range tm.recordedOTSpanTracers {
-		if tracer != globalOtTracer {
-			t.Errorf("Expected OpenTracing tracer %d to be the same as global tracer (%#v), but got %#v", idx, globalOtTracer, tracer)
-		}
-	}
-	for idx, tracer := range tm.recordedOtelSpanTracers {
-		if tracer != globalOtelTracer {
-			t.Errorf("Expected OpenTelemetry tracer %d to be the same as global tracer (%#v), but got %#v", idx, globalOtelTracer, tracer)
-		}
-	}
-}
-
-func (tm *tracerMessTest) runOtelOTOtel(t *testing.T, ctx context.Context) {
-	runOtelOTOtel(t, ctx, "tm", tm.recordTracers)
-}
-
-func (tm *tracerMessTest) runOTOtelOT(t *testing.T, ctx context.Context) {
-	runOTOtelOT(t, ctx, "tm", tm.recordTracers)
-}
-
-func (tm *tracerMessTest) recordTracers(t *testing.T, ctx context.Context) context.Context {
-	otSpan := ot.SpanFromContext(ctx)
-	if otSpan == nil {
-		t.Errorf("No current OpenTracing span?")
-	} else {
-		tm.recordedOTSpanTracers = append(tm.recordedOTSpanTracers, otSpan.Tracer())
-	}
-
-	otelSpan := trace.SpanFromContext(ctx)
-	tm.recordedOtelSpanTracers = append(tm.recordedOtelSpanTracers, otelSpan.Tracer())
-	return ctx
-}
-
 // baggage interoperation test
 
 type baggageInteroperationTest struct {
@@ -589,7 +514,18 @@ func (bio *baggageInteroperationTest) addAndRecordBaggage(t *testing.T, ctx cont
 	value := bio.baggageItems[idx].value
 
 	otSpan.SetBaggageItem(otKey, value)
-	ctx = otelbaggage.NewContext(ctx, attribute.String(otelKey, value))
+
+	m, err := baggage.NewMember(otelKey, value)
+	if err != nil {
+		t.Error(err)
+		return ctx
+	}
+	b, err := baggage.FromContext(ctx).SetMember(m)
+	if err != nil {
+		t.Error(err)
+		return ctx
+	}
+	ctx = baggage.ContextWithBaggage(ctx, b)
 
 	otRecording := make(map[string]string)
 	otSpan.Context().ForeachBaggageItem(func(key, value string) bool {
@@ -597,10 +533,9 @@ func (bio *baggageInteroperationTest) addAndRecordBaggage(t *testing.T, ctx cont
 		return true
 	})
 	otelRecording := make(map[string]string)
-	otelbaggage.MapFromContext(ctx).Foreach(func(kv attribute.KeyValue) bool {
-		otelRecording[string(kv.Key)] = kv.Value.Emit()
-		return true
-	})
+	for _, m := range baggage.FromContext(ctx).Members() {
+		otelRecording[m.Key()] = m.Value()
+	}
 	bio.recordedOTBaggage = append(bio.recordedOTBaggage, otRecording)
 	bio.recordedOtelBaggage = append(bio.recordedOtelBaggage, otelRecording)
 	return ctx

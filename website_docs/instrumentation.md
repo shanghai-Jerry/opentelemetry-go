@@ -1,5 +1,5 @@
 ---
-title: "Instrumentation"
+title: Instrumentation
 weight: 3
 ---
 
@@ -11,7 +11,7 @@ Spans are created by tracers, which can be acquired from a Tracer Provider.
 
 ```go
 ctx := context.Background()
-tracer := provider.Tracer("example/main")
+tracer := otel.Tracer("example/main")
 var span trace.Span
 ctx, span = tracer.Start(ctx, "helloWorld")
 defer span.End()
@@ -21,20 +21,20 @@ In Go, the `context` package is used to store the active span. When you start a 
 
 ```go
 func parentFunction() {
-  ctx := context.Background()
-  var parentSpan trace.Span
-  ctx, parentSpan = tracer.Start(ctx, "parent")
-  defer parentSpan.End()
-  // call our child function
-  childFunction(ctx)
-  // do more work, when this function ends, parentSpan will complete.
+	ctx := context.Background()
+	var parentSpan trace.Span
+	ctx, parentSpan = tracer.Start(ctx, "parent")
+	defer parentSpan.End()
+	// call our child function
+	childFunction(ctx)
+	// do more work, when this function ends, parentSpan will complete.
 }
 
 func childFunction(ctx context.Context) {
-  var childSpan trace.Span
-  ctx, childSpan = tracer.Start(ctx, "child")
-  defer childSpan.End()
-  // do work here, when this function returns, childSpan will complete.
+	var childSpan trace.Span
+	ctx, childSpan = tracer.Start(ctx, "child")
+	defer childSpan.End()
+	// do work here, when this function returns, childSpan will complete.
 }
 ```
 
@@ -60,9 +60,9 @@ span.SetAttributes(myKey.String("a value"))
 
 ### Semantic Attributes
 
-Semantic Attributes are attributes that are defined by the OpenTelemetry Specification in order to provide a shared set of attribute keys across multiple languages, frameworks, and runtimes for common concepts like HTTP methods, status codes, user agents, and more. These attributes are available in the `go.opentelemetry.io/otel/semconv` package.
+Semantic Attributes are attributes that are defined by the [OpenTelemetry Specification][] in order to provide a shared set of attribute keys across multiple languages, frameworks, and runtimes for common concepts like HTTP methods, status codes, user agents, and more. These attributes are available in the `go.opentelemetry.io/otel/semconv/v1.7.0` package.
 
-Tracing semantic conventions can be found [in this document](https://github.com/open-telemetry/opentelemetry-specification/tree/main/specification/trace/semantic_conventions)
+For details, see [Trace semantic conventions][].
 
 ## Events
 
@@ -93,7 +93,7 @@ The metrics API is currently unstable, documentation TBA.
 
 Traces can extend beyond a single process. This requires _context propagation_, a mechanism where identifiers for a trace are sent to remote processes.
 
-In order to propagate trace context over the wire, a propagator must be registered with the OpenTelemetry SDK.
+In order to propagate trace context over the wire, a propagator must be registered with the OpenTelemetry API.
 
 ```go
 import (
@@ -111,3 +111,6 @@ After configuring context propagation, you'll most likely want to use automatic 
 # Automatic Instrumentation
 
 Automatic instrumentation, broadly, refers to instrumentation code that you didn't write. OpenTelemetry for Go supports this process through wrappers and helper functions around many popular frameworks and libraries. You can find a current list [here](https://github.com/open-telemetry/opentelemetry-go-contrib/tree/main/instrumentation), as well as at the [registry](/registry).
+
+[OpenTelemetry Specification]: {{< relref "/docs/reference/specification" >}}
+[Trace semantic conventions]: {{< relref "/docs/reference/specification/trace/semantic_conventions" >}}

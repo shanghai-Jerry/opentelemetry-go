@@ -113,6 +113,7 @@ A PR is considered to be **ready to merge** when:
   one day and may be merged with a single Maintainer's approval.
 * `CHANGELOG.md` has been updated to reflect what has been
   added, changed, removed, or fixed.
+* `README.md` has been updated if necessary.
 * Urgent fix can take exception as long as it has been actively
   communicated.
 
@@ -142,6 +143,26 @@ patterns in the spec.
 
 For a deeper discussion, see
 [this](https://github.com/open-telemetry/opentelemetry-specification/issues/165).
+
+## Documentation
+
+Each non-example Go Module should have its own `README.md` containing:
+
+- A pkg.go.dev badge which can be generated [here](https://pkg.go.dev/badge/).
+- Brief description.
+- Installation instructions (and requirements if applicable).
+- Hyperlink to an example. Depending on the component the example can be:
+  - An `example_test.go` like [here](exporters/stdout/stdouttrace/example_test.go).
+  - A sample Go application with its own `README.md`, like [here](example/zipkin).
+- Additional documentation sections such us:
+  - Configuration,
+  - Contributing,
+  - References.
+
+[Here](exporters/jaeger/README.md) is an example of a concise `README.md`.
+
+Moreover, it should be possible to navigate to any `README.md` from the
+root `README.md`.
 
 ## Style Guide
 
@@ -180,7 +201,7 @@ specific type name this Configuration applies to if there are multiple
 ```go
 // config contains configuration options for a thing.
 type config struct {
-    // options ...
+	// options ...
 }
 ```
 
@@ -190,8 +211,16 @@ will likely want to build custom options for the configuration, the `config`
 should be exported. Please, include in the documentation for the `config`
 how the user can extend the configuration.
 
-It is important that `config` are not shared across package boundaries.
-Meaning a `config` from one package should not be directly used by another.
+It is important that internal `config` are not shared across package boundaries.
+Meaning a `config` from one package should not be directly used by another. The
+one exception is the API packages.  The configs from the base API, eg.
+`go.opentelemetry.io/otel/trace.TracerConfig` and
+`go.opentelemetry.io/otel/metric.InstrumentConfig`, are intended to be consumed
+by the SDK therefor it is expected that these are exported.
+
+When a config is exported we want to maintain forward and backward
+compatibility, to achieve this no fields should be exported but should
+instead be accessed by methods.
 
 Optionally, it is common to include a `newConfig` function (with the same
 naming scheme). This function wraps any defaults setting and looping over
@@ -200,13 +229,13 @@ all options to create a configured `config`.
 ```go
 // newConfig returns an appropriately configured config.
 func newConfig([]Option) config {
-    // Set default values for config.
-    config := config{/* […] */}
-    for _, option := range options {
-        option.apply(&config)
-    }
-    // Preform any validation here.
-    return config
+	// Set default values for config.
+	config := config{/* […] */}
+	for _, option := range options {
+		option.apply(&config)
+	}
+	// Preform any validation here.
+	return config
 }
 ```
 
@@ -224,7 +253,7 @@ To set the value of the options a `config` contains, a corresponding
 
 ```go
 type Option interface {
-    apply(*config)
+	apply(*config)
 }
 ```
 
@@ -255,12 +284,12 @@ func With*(…) Option { … }
 type defaultFalseOption bool
 
 func (o defaultFalseOption) apply(c *config) {
-    c.Bool = bool(o)
+	c.Bool = bool(o)
 }
 
 // WithOption sets a T to have an option included.
 func WithOption() Option {
-    return defaultFalseOption(true)
+	return defaultFalseOption(true)
 }
 ```
 
@@ -268,12 +297,12 @@ func WithOption() Option {
 type defaultTrueOption bool
 
 func (o defaultTrueOption) apply(c *config) {
-    c.Bool = bool(o)
+	c.Bool = bool(o)
 }
 
 // WithoutOption sets a T to have Bool option excluded.
 func WithoutOption() Option {
-    return defaultTrueOption(false)
+	return defaultTrueOption(false)
 }
 ```
 
@@ -281,16 +310,33 @@ func WithoutOption() Option {
 
 ```go
 type myTypeOption struct {
-    MyType MyType
+	MyType MyType
 }
 
 func (o myTypeOption) apply(c *config) {
-    c.MyType = o.MyType
+	c.MyType = o.MyType
 }
 
 // WithMyType sets T to have include MyType.
 func WithMyType(t MyType) Option {
-    return myTypeOption{t}
+	return myTypeOption{t}
+}
+```
+
+##### Functional Options
+
+```go
+type optionFunc func(*config)
+
+func (fn optionFunc) apply(c *config) {
+	fn(c)
+}
+
+// WithMyType sets t as MyType.
+func WithMyType(t MyType) Option {
+	return optionFunc(func(c *config) {
+		c.MyType = t
+	})
 }
 ```
 
@@ -317,25 +363,25 @@ For example.
 ```go
 // config holds options for all animals.
 type config struct {
-    Weight      float64
-    Color       string
-    MaxAltitude float64
+	Weight      float64
+	Color       string
+	MaxAltitude float64
 }
 
 // DogOption apply Dog specific options.
 type DogOption interface {
-    applyDog(*config)
+	applyDog(*config)
 }
 
 // BirdOption apply Bird specific options.
 type BirdOption interface {
-    applyBird(*config)
+	applyBird(*config)
 }
 
 // Option apply options for all animals.
 type Option interface {
-    BirdOption
-    DogOption
+	BirdOption
+	DogOption
 }
 
 type weightOption float64
@@ -355,13 +401,76 @@ func NewDog(name string, o ...DogOption) Dog    {…}
 func NewBird(name string, o ...BirdOption) Bird {…}
 ```
 
-### Interface Type
+### Interfaces
 
 To allow other developers to better comprehend the code, it is important
 to ensure it is sufficiently documented. One simple measure that contributes
 to this aim is self-documenting by naming method parameters. Therefore,
 where appropriate, methods of every exported interface type should have
 their parameters appropriately named.
+
+#### Interface Stability
+
+All exported stable interfaces that include the following warning in their
+doumentation are allowed to be extended with additional methods.
+
+> Warning: methods may be added to this interface in minor releases.
+
+Otherwise, stable interfaces MUST NOT be modified.
+
+If new functionality is needed for an interface that cannot be changed it MUST
+be added by including an additional interface. That added interface can be a
+simple interface for the specific functionality that you want to add or it can
+be a super-set of the original interface. For example, if you wanted to a
+`Close` method to the `Exporter` interface:
+
+```go
+type Exporter interface {
+	Export()
+}
+```
+
+A new interface, `Closer`, can be added:
+
+```go
+type Closer interface {
+	Close()
+}
+```
+
+Code that is passed the `Exporter` interface can now check to see if the passed
+value also satisfies the new interface. E.g.
+
+```go
+func caller(e Exporter) {
+	/* ... */
+	if c, ok := e.(Closer); ok {
+		c.Close()
+	}
+	/* ... */
+}
+```
+
+Alternatively, a new type that is the super-set of an `Exporter` can be created.
+
+```go
+type ClosingExporter struct {
+	Exporter
+	Close()
+}
+```
+
+This new type can be used similar to the simple interface above in that a
+passed `Exporter` type can be asserted to satisfy the `ClosingExporter` type
+and the `Close` method called.
+
+This super-set approach can be useful if there is explicit behavior that needs
+to be coupled with the original type and passed as a unified type to a new
+function, but, because of this coupling, it also limits the applicability of
+the added functionality. If there exist other interfaces where this
+functionality should be added, each one will need their own super-set
+interfaces and will duplicate the pattern. For this reason, the simple targeted
+interface that defines the specific functionality should be preferred.
 
 ## Approvers and Maintainers
 
@@ -372,9 +481,11 @@ Approvers:
 - [Sam Xie](https://github.com/XSAM)
 - [David Ashpole](https://github.com/dashpole), Google
 - [Gustavo Silva Paiva](https://github.com/paivagustavo), LightStep
+- [Robert Pająk](https://github.com/pellared), Splunk
 
 Maintainers:
 
+- [Aaron Clawson](https://github.com/MadVikingGod), LightStep
 - [Anthony Mirabella](https://github.com/Aneurysm9), AWS
 - [Tyler Yahn](https://github.com/MrAlias), Splunk
 

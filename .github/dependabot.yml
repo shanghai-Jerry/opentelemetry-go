@@ -48,6 +48,26 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
+    directory: /bridge/opencensus/test
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /example/fib
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
     directory: /example/prom-collector
     labels:
       - dependencies
@@ -98,6 +118,16 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
+    directory: /example/passthrough
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
     directory: /example/prometheus
     labels:
       - dependencies
@@ -118,7 +148,7 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
-    directory: /exporters/metric/prometheus
+    directory: /exporters/prometheus
     labels:
       - dependencies
       - go
@@ -128,7 +158,7 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
-    directory: /exporters/otlp
+    directory: /exporters/stdout/stdouttrace
     labels:
       - dependencies
       - go
@@ -138,7 +168,7 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
-    directory: /exporters/stdout
+    directory: /exporters/stdout/stdoutmetric
     labels:
       - dependencies
       - go
@@ -148,7 +178,7 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
-    directory: /exporters/trace/jaeger
+    directory: /exporters/jaeger
     labels:
       - dependencies
       - go
@@ -158,7 +188,7 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
-    directory: /exporters/trace/zipkin
+    directory: /exporters/zipkin
     labels:
       - dependencies
       - go
@@ -178,7 +208,27 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
+    directory: /internal/metric
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
     directory: /internal/tools
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /metric
     labels:
       - dependencies
       - go
@@ -208,7 +258,98 @@ updates:
       interval: weekly
   -
     package-ecosystem: gomod
-    directory: /oteltest
+    directory: /internal/tools/semconv-gen
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/internal/retry
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/otlptrace
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/otlptrace/otlptracegrpc
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/otlptrace/otlptracehttp
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/otlpmetric
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/otlpmetric/otlpmetricgrpc
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /trace
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+  -
+    package-ecosystem: gomod
+    directory: /exporters/otlp/otlpmetric/otlpmetrichttp
+    labels:
+      - dependencies
+      - go
+      - "Skip Changelog"
+    schedule:
+      day: sunday
+      interval: weekly
+
+  -
+    package-ecosystem: gomod
+    directory: /schema
     labels:
       - dependencies
       - go

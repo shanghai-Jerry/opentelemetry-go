@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -25,26 +26,33 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.opentelemetry.io/otel/trace"
-
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type testBatchExporter struct {
 	mu            sync.Mutex
-	spans         []*sdktrace.SpanSnapshot
+	spans         []sdktrace.ReadOnlySpan
 	sizes         []int
 	batchCount    int
 	shutdownCount int
-	delay         time.Duration
+	errors        []error
+	droppedCount  int
+	idx           int
 	err           error
 }
 
-func (t *testBatchExporter) ExportSpans(ctx context.Context, ss []*sdktrace.SpanSnapshot) error {
+func (t *testBatchExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	time.Sleep(t.delay)
+	if t.idx < len(t.errors) {
+		t.droppedCount += len(spans)
+		err := t.errors[t.idx]
+		t.idx++
+		return err
+	}
 
 	select {
 	case <-ctx.Done():
@@ -53,8 +61,8 @@ func (t *testBatchExporter) ExportSpans(ctx context.Context, ss []*sdktrace.Span
 	default:
 	}
 
-	t.spans = append(t.spans, ss...)
-	t.sizes = append(t.sizes, len(ss))
+	t.spans = append(t.spans, spans...)
+	t.sizes = append(t.sizes, len(spans))
 	t.batchCount++
 	return nil
 }
@@ -99,34 +107,22 @@ func TestNewBatchSpanProcessorWithNilExporter(t *testing.T) {
 }
 
 type testOption struct {
-	name              string
-	o                 []sdktrace.BatchSpanProcessorOption
-	wantNumSpans      int
-	wantBatchCount    int
-	wantExportTimeout bool
-	genNumSpans       int
-	delayExportBy     time.Duration
-	parallel          bool
+	name           string
+	o              []sdktrace.BatchSpanProcessorOption
+	wantNumSpans   int
+	wantBatchCount int
+	genNumSpans    int
+	parallel       bool
 }
 
 func TestNewBatchSpanProcessorWithOptions(t *testing.T) {
 	schDelay := 200 * time.Millisecond
-	exportTimeout := time.Millisecond
 	options := []testOption{
 		{
 			name:           "default BatchSpanProcessorOptions",
 			wantNumSpans:   2053,
 			wantBatchCount: 4,
 			genNumSpans:    2053,
-		},
-		{
-			name: "non-default ExportTimeout",
-			o: []sdktrace.BatchSpanProcessorOption{
-				sdktrace.WithExportTimeout(exportTimeout),
-			},
-			wantExportTimeout: true,
-			genNumSpans:       2053,
-			delayExportBy:     2 * exportTimeout, // to ensure export timeout
 		},
 		{
 			name: "non-default BatchTimeout",
@@ -194,9 +190,7 @@ func TestNewBatchSpanProcessorWithOptions(t *testing.T) {
 	}
 	for _, option := range options {
 		t.Run(option.name, func(t *testing.T) {
-			te := testBatchExporter{
-				delay: option.delayExportBy,
-			}
+			te := testBatchExporter{}
 			tp := basicTracerProvider(t)
 			ssp := createAndRegisterBatchSP(option, &te)
 			if ssp == nil {
@@ -221,12 +215,38 @@ func TestNewBatchSpanProcessorWithOptions(t *testing.T) {
 					gotBatchCount, option.wantBatchCount)
 				t.Errorf("Batches %v\n", te.sizes)
 			}
-
-			if option.wantExportTimeout && te.err != context.DeadlineExceeded {
-				t.Errorf("context deadline: got err %+v, want %+v\n",
-					te.err, context.DeadlineExceeded)
-			}
 		})
+	}
+}
+
+type stuckExporter struct {
+	testBatchExporter
+}
+
+// ExportSpans waits for ctx to expire and returns that error.
+func (e *stuckExporter) ExportSpans(ctx context.Context, _ []sdktrace.ReadOnlySpan) error {
+	<-ctx.Done()
+	e.err = ctx.Err()
+	return ctx.Err()
+}
+
+func TestBatchSpanProcessorExportTimeout(t *testing.T) {
+	exp := new(stuckExporter)
+	bsp := sdktrace.NewBatchSpanProcessor(
+		exp,
+		// Set a non-zero export timeout so a deadline is set.
+		sdktrace.WithExportTimeout(1*time.Microsecond),
+		sdktrace.WithBlocking(),
+	)
+	tp := basicTracerProvider(t)
+	tp.RegisterSpanProcessor(bsp)
+
+	tr := tp.Tracer("BatchSpanProcessorExportTimeout")
+	generateSpan(t, false, tr, testOption{genNumSpans: 1})
+	tp.UnregisterSpanProcessor(bsp)
+
+	if exp.err != context.DeadlineExceeded {
+		t.Errorf("context deadline error not returned: got %+v", exp.err)
 	}
 }
 
@@ -338,12 +358,8 @@ func TestBatchSpanProcessorForceFlushSucceeds(t *testing.T) {
 	// Force flush any held span batches
 	err := ssp.ForceFlush(context.Background())
 
-	gotNumOfSpans := te.len()
-	spanDifference := option.wantNumSpans - gotNumOfSpans
-	if spanDifference > 10 || spanDifference < 0 {
-		t.Errorf("number of exported span not equal to or within 10 less than: got %+v, want %+v\n",
-			gotNumOfSpans, option.wantNumSpans)
-	}
+	assertMaxSpanDiff(t, te.len(), option.wantNumSpans, 10)
+
 	gotBatchCount := te.getBatchCount()
 	if gotBatchCount < option.wantBatchCount {
 		t.Errorf("number batches: got %+v, want >= %+v\n",
@@ -353,31 +369,114 @@ func TestBatchSpanProcessorForceFlushSucceeds(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestBatchSpanProcessorDropBatchIfFailed(t *testing.T) {
+	te := testBatchExporter{
+		errors: []error{errors.New("fail to export")},
+	}
+	tp := basicTracerProvider(t)
+	option := testOption{
+		o: []sdktrace.BatchSpanProcessorOption{
+			sdktrace.WithMaxQueueSize(0),
+			sdktrace.WithMaxExportBatchSize(2000),
+		},
+		wantNumSpans:   1000,
+		wantBatchCount: 1,
+		genNumSpans:    1000,
+	}
+	ssp := createAndRegisterBatchSP(option, &te)
+	if ssp == nil {
+		t.Fatalf("%s: Error creating new instance of BatchSpanProcessor\n", option.name)
+	}
+	tp.RegisterSpanProcessor(ssp)
+	tr := tp.Tracer("BatchSpanProcessorWithOption")
+	generateSpan(t, option.parallel, tr, option)
+
+	// Force flush any held span batches
+	err := ssp.ForceFlush(context.Background())
+	assert.Error(t, err)
+	assert.EqualError(t, err, "fail to export")
+
+	// First flush will fail, nothing should be exported.
+	assertMaxSpanDiff(t, te.droppedCount, option.wantNumSpans, 10)
+	assert.Equal(t, 0, te.len())
+	assert.Equal(t, 0, te.getBatchCount())
+
+	// Generate a new batch, this will succeed
+	generateSpan(t, option.parallel, tr, option)
+
+	// Force flush any held span batches
+	err = ssp.ForceFlush(context.Background())
+	assert.NoError(t, err)
+
+	assertMaxSpanDiff(t, te.len(), option.wantNumSpans, 10)
+	gotBatchCount := te.getBatchCount()
+	if gotBatchCount < option.wantBatchCount {
+		t.Errorf("number batches: got %+v, want >= %+v\n",
+			gotBatchCount, option.wantBatchCount)
+		t.Errorf("Batches %v\n", te.sizes)
+	}
+}
+
+func assertMaxSpanDiff(t *testing.T, want, got, maxDif int) {
+	spanDifference := want - got
+	if spanDifference < 0 {
+		spanDifference = spanDifference * -1
+	}
+	if spanDifference > maxDif {
+		t.Errorf("number of exported span not equal to or within %d less than: got %+v, want %+v\n",
+			maxDif, got, want)
+	}
+}
+
+type indefiniteExporter struct{}
+
+func (indefiniteExporter) Shutdown(context.Context) error { return nil }
+func (indefiniteExporter) ExportSpans(ctx context.Context, _ []sdktrace.ReadOnlySpan) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func TestBatchSpanProcessorForceFlushTimeout(t *testing.T) {
-	var bp testBatchExporter
-	bsp := sdktrace.NewBatchSpanProcessor(&bp)
 	// Add timeout to context to test deadline
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
 	<-ctx.Done()
 
-	if err := bsp.ForceFlush(ctx); err == nil {
-		t.Error("expected context DeadlineExceeded error, got nil")
-	} else if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected context DeadlineExceeded error, got %v", err)
+	bsp := sdktrace.NewBatchSpanProcessor(indefiniteExporter{})
+	if got, want := bsp.ForceFlush(ctx), context.DeadlineExceeded; !errors.Is(got, want) {
+		t.Errorf("expected %q error, got %v", want, got)
 	}
 }
 
 func TestBatchSpanProcessorForceFlushCancellation(t *testing.T) {
-	var bp testBatchExporter
-	bsp := sdktrace.NewBatchSpanProcessor(&bp)
 	ctx, cancel := context.WithCancel(context.Background())
 	// Cancel the context
 	cancel()
 
-	if err := bsp.ForceFlush(ctx); err == nil {
-		t.Error("expected context canceled error, got nil")
-	} else if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context canceled error, got %v", err)
+	bsp := sdktrace.NewBatchSpanProcessor(indefiniteExporter{})
+	if got, want := bsp.ForceFlush(ctx), context.Canceled; !errors.Is(got, want) {
+		t.Errorf("expected %q error, got %v", want, got)
+	}
+}
+
+func TestBatchSpanProcessorForceFlushQueuedSpans(t *testing.T) {
+	ctx := context.Background()
+
+	exp := tracetest.NewInMemoryExporter()
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+	)
+
+	tracer := tp.Tracer("tracer")
+
+	for i := 0; i < 10; i++ {
+		_, span := tracer.Start(ctx, fmt.Sprintf("span%d", i))
+		span.End()
+
+		err := tp.ForceFlush(ctx)
+		assert.NoError(t, err)
+
+		assert.Len(t, exp.GetSpans(), i+1)
 	}
 }

@@ -69,8 +69,23 @@ func TestNoopSpan(t *testing.T) {
 	if got, want := span.IsRecording(), false; got != want {
 		t.Errorf("span.IsRecording() returned %#v, want %#v", got, want)
 	}
+}
 
-	if got, want := span.Tracer(), tracer; got != want {
-		t.Errorf("span.Tracer() returned %#v, want %#v", got, want)
+func TestNonRecordingSpanTracerStart(t *testing.T) {
+	tid, err := TraceIDFromHex("01000000000000000000000000000000")
+	if err != nil {
+		t.Fatalf("failure creating TraceID: %s", err.Error())
+	}
+	sid, err := SpanIDFromHex("0200000000000000")
+	if err != nil {
+		t.Fatalf("failure creating SpanID: %s", err.Error())
+	}
+	sc := NewSpanContext(SpanContextConfig{TraceID: tid, SpanID: sid})
+
+	ctx := ContextWithSpanContext(context.Background(), sc)
+	_, span := NewNoopTracerProvider().Tracer("test instrumentation").Start(ctx, "span1")
+
+	if got, want := span.SpanContext(), sc; !assertSpanContextEqual(got, want) {
+		t.Errorf("SpanContext not carried by nonRecordingSpan. got %#v, want %#v", got, want)
 	}
 }

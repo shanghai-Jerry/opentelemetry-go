@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package matchers
+package matchers // import "go.opentelemetry.io/otel/internal/matchers"
 
 type TemporalMatcher byte
 
+//nolint:revive // ignoring missing comments for unexported constants in an internal package
 const (
 	Before TemporalMatcher = iota
 	BeforeOrSameTime
