@@ -16,181 +16,114 @@ package otlpconfig // import "go.opentelemetry.io/otel/exporters/otlp/otlpmetric
 
 import (
 	"crypto/tls"
-	"fmt"
 	"io/ioutil"
 	"net/url"
 	"os"
-	"regexp"
-	"strconv"
+	"path"
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/internal/envconfig"
 )
 
-var httpSchemeRegexp = regexp.MustCompile(`(?i)^http://|https://`)
-
-func ApplyGRPCEnvConfigs(cfg *Config) {
-	e := EnvOptionsReader{
-		GetEnv:   os.Getenv,
-		ReadFile: ioutil.ReadFile,
-	}
-
-	e.ApplyGRPCEnvConfigs(cfg)
+// DefaultEnvOptionsReader is the default environments reader.
+var DefaultEnvOptionsReader = envconfig.EnvOptionsReader{
+	GetEnv:    os.Getenv,
+	ReadFile:  ioutil.ReadFile,
+	Namespace: "OTEL_EXPORTER_OTLP",
 }
 
-func ApplyHTTPEnvConfigs(cfg *Config) {
-	e := EnvOptionsReader{
-		GetEnv:   os.Getenv,
-		ReadFile: ioutil.ReadFile,
-	}
-
-	e.ApplyHTTPEnvConfigs(cfg)
-}
-
-type EnvOptionsReader struct {
-	GetEnv   func(string) string
-	ReadFile func(filename string) ([]byte, error)
-}
-
-func (e *EnvOptionsReader) ApplyHTTPEnvConfigs(cfg *Config) {
-	opts := e.GetOptionsFromEnv()
+// ApplyGRPCEnvConfigs applies the env configurations for gRPC.
+func ApplyGRPCEnvConfigs(cfg Config) Config {
+	opts := getOptionsFromEnv()
 	for _, opt := range opts {
-		opt.ApplyHTTPOption(cfg)
+		cfg = opt.ApplyGRPCOption(cfg)
 	}
+	return cfg
 }
 
-func (e *EnvOptionsReader) ApplyGRPCEnvConfigs(cfg *Config) {
-	opts := e.GetOptionsFromEnv()
+// ApplyHTTPEnvConfigs applies the env configurations for HTTP.
+func ApplyHTTPEnvConfigs(cfg Config) Config {
+	opts := getOptionsFromEnv()
 	for _, opt := range opts {
-		opt.ApplyGRPCOption(cfg)
+		cfg = opt.ApplyHTTPOption(cfg)
 	}
+	return cfg
 }
 
-func (e *EnvOptionsReader) GetOptionsFromEnv() []GenericOption {
-	var opts []GenericOption
+func getOptionsFromEnv() []GenericOption {
+	opts := []GenericOption{}
 
-	// Endpoint
-	if v, ok := e.getEnvValue("ENDPOINT"); ok {
-		if isInsecureEndpoint(v) {
-			opts = append(opts, WithInsecure())
-		} else {
-			opts = append(opts, WithSecure())
-		}
-
-		opts = append(opts, WithEndpoint(trimSchema(v)))
-	}
-	if v, ok := e.getEnvValue("METRICS_ENDPOINT"); ok {
-		if isInsecureEndpoint(v) {
-			opts = append(opts, WithInsecure())
-		} else {
-			opts = append(opts, WithSecure())
-		}
-
-		opts = append(opts, WithEndpoint(trimSchema(v)))
-	}
-
-	// Certificate File
-	if path, ok := e.getEnvValue("CERTIFICATE"); ok {
-		if tls, err := e.readTLSConfig(path); err == nil {
-			opts = append(opts, WithTLSClientConfig(tls))
-		} else {
-			otel.Handle(fmt.Errorf("failed to configure otlp exporter certificate '%s': %w", path, err))
-		}
-	}
-	if path, ok := e.getEnvValue("METRICS_CERTIFICATE"); ok {
-		if tls, err := e.readTLSConfig(path); err == nil {
-			opts = append(opts, WithTLSClientConfig(tls))
-		} else {
-			otel.Handle(fmt.Errorf("failed to configure otlp exporter certificate '%s': %w", path, err))
-		}
-	}
-
-	// Headers
-	if h, ok := e.getEnvValue("HEADERS"); ok {
-		opts = append(opts, WithHeaders(stringToHeader(h)))
-	}
-	if h, ok := e.getEnvValue("METRICS_HEADERS"); ok {
-		opts = append(opts, WithHeaders(stringToHeader(h)))
-	}
-
-	// Compression
-	if c, ok := e.getEnvValue("COMPRESSION"); ok {
-		opts = append(opts, WithCompression(stringToCompression(c)))
-	}
-	if c, ok := e.getEnvValue("METRICS_COMPRESSION"); ok {
-		opts = append(opts, WithCompression(stringToCompression(c)))
-	}
-
-	// Timeout
-	if t, ok := e.getEnvValue("TIMEOUT"); ok {
-		if d, err := strconv.Atoi(t); err == nil {
-			opts = append(opts, WithTimeout(time.Duration(d)*time.Millisecond))
-		}
-	}
-	if t, ok := e.getEnvValue("METRICS_TIMEOUT"); ok {
-		if d, err := strconv.Atoi(t); err == nil {
-			opts = append(opts, WithTimeout(time.Duration(d)*time.Millisecond))
-		}
-	}
+	DefaultEnvOptionsReader.Apply(
+		envconfig.WithURL("ENDPOINT", func(u *url.URL) {
+			opts = append(opts, withEndpointScheme(u))
+			opts = append(opts, newSplitOption(func(cfg Config) Config {
+				cfg.Metrics.Endpoint = u.Host
+				// For OTLP/HTTP endpoint URLs without a per-signal
+				// configuration, the passed endpoint is used as a base URL
+				// and the signals are sent to these paths relative to that.
+				cfg.Metrics.URLPath = path.Join(u.Path, DefaultMetricsPath)
+				return cfg
+			}, withEndpointForGRPC(u)))
+		}),
+		envconfig.WithURL("METRICS_ENDPOINT", func(u *url.URL) {
+			opts = append(opts, withEndpointScheme(u))
+			opts = append(opts, newSplitOption(func(cfg Config) Config {
+				cfg.Metrics.Endpoint = u.Host
+				// For endpoint URLs for OTLP/HTTP per-signal variables, the
+				// URL MUST be used as-is without any modification. The only
+				// exception is that if an URL contains no path part, the root
+				// path / MUST be used.
+				path := u.Path
+				if path == "" {
+					path = "/"
+				}
+				cfg.Metrics.URLPath = path
+				return cfg
+			}, withEndpointForGRPC(u)))
+		}),
+		envconfig.WithTLSConfig("CERTIFICATE", func(c *tls.Config) { opts = append(opts, WithTLSClientConfig(c)) }),
+		envconfig.WithTLSConfig("METRICS_CERTIFICATE", func(c *tls.Config) { opts = append(opts, WithTLSClientConfig(c)) }),
+		envconfig.WithHeaders("HEADERS", func(h map[string]string) { opts = append(opts, WithHeaders(h)) }),
+		envconfig.WithHeaders("METRICS_HEADERS", func(h map[string]string) { opts = append(opts, WithHeaders(h)) }),
+		WithEnvCompression("COMPRESSION", func(c Compression) { opts = append(opts, WithCompression(c)) }),
+		WithEnvCompression("METRICS_COMPRESSION", func(c Compression) { opts = append(opts, WithCompression(c)) }),
+		envconfig.WithDuration("TIMEOUT", func(d time.Duration) { opts = append(opts, WithTimeout(d)) }),
+		envconfig.WithDuration("METRICS_TIMEOUT", func(d time.Duration) { opts = append(opts, WithTimeout(d)) }),
+	)
 
 	return opts
 }
 
-func isInsecureEndpoint(endpoint string) bool {
-	return strings.HasPrefix(strings.ToLower(endpoint), "http://") || strings.HasPrefix(strings.ToLower(endpoint), "unix://")
-}
-
-func trimSchema(endpoint string) string {
-	return httpSchemeRegexp.ReplaceAllString(endpoint, "")
-}
-
-// getEnvValue gets an OTLP environment variable value of the specified key using the GetEnv function.
-// This function already prepends the OTLP prefix to all key lookup.
-func (e *EnvOptionsReader) getEnvValue(key string) (string, bool) {
-	v := strings.TrimSpace(e.GetEnv(fmt.Sprintf("OTEL_EXPORTER_OTLP_%s", key)))
-	return v, v != ""
-}
-
-func (e *EnvOptionsReader) readTLSConfig(path string) (*tls.Config, error) {
-	b, err := e.ReadFile(path)
-	if err != nil {
-		return nil, err
+func withEndpointForGRPC(u *url.URL) func(cfg Config) Config {
+	return func(cfg Config) Config {
+		// For OTLP/gRPC endpoints, this is the target to which the
+		// exporter is going to send telemetry.
+		cfg.Metrics.Endpoint = path.Join(u.Host, u.Path)
+		return cfg
 	}
-	return CreateTLSConfig(b)
 }
 
-func stringToCompression(value string) Compression {
-	switch value {
-	case "gzip":
-		return GzipCompression
-	}
+// WithEnvCompression retrieves the specified config and passes it to ConfigFn as a Compression.
+func WithEnvCompression(n string, fn func(Compression)) func(e *envconfig.EnvOptionsReader) {
+	return func(e *envconfig.EnvOptionsReader) {
+		if v, ok := e.GetEnvValue(n); ok {
+			cp := NoCompression
+			switch v {
+			case "gzip":
+				cp = GzipCompression
+			}
 
-	return NoCompression
+			fn(cp)
+		}
+	}
 }
 
-func stringToHeader(value string) map[string]string {
-	headersPairs := strings.Split(value, ",")
-	headers := make(map[string]string)
-
-	for _, header := range headersPairs {
-		nameValue := strings.SplitN(header, "=", 2)
-		if len(nameValue) < 2 {
-			continue
-		}
-		name, err := url.QueryUnescape(nameValue[0])
-		if err != nil {
-			continue
-		}
-		trimmedName := strings.TrimSpace(name)
-		value, err := url.QueryUnescape(nameValue[1])
-		if err != nil {
-			continue
-		}
-		trimmedValue := strings.TrimSpace(value)
-
-		headers[trimmedName] = trimmedValue
+func withEndpointScheme(u *url.URL) GenericOption {
+	switch strings.ToLower(u.Scheme) {
+	case "http", "unix":
+		return WithInsecure()
+	default:
+		return WithSecure()
 	}
-
-	return headers
 }

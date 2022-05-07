@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/metric/number"
-	export "go.opentelemetry.io/otel/sdk/export/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
+	"go.opentelemetry.io/otel/sdk/metric/export"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/number"
 	"go.opentelemetry.io/otel/sdk/resource"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
@@ -40,7 +40,7 @@ var (
 
 	// ErrIncompatibleAgg is returned when
 	// aggregation.Kind implies an interface conversion that has
-	// failed
+	// failed.
 	ErrIncompatibleAgg = errors.New("incompatible aggregation type")
 
 	// ErrUnknownValueType is returned when a transformation of an unknown value
@@ -72,7 +72,7 @@ func toNanos(t time.Time) uint64 {
 // InstrumentationLibraryReader transforms all records contained in a checkpoint into
 // batched OTLP ResourceMetrics.
 func InstrumentationLibraryReader(ctx context.Context, temporalitySelector aggregation.TemporalitySelector, res *resource.Resource, ilmr export.InstrumentationLibraryReader, numWorkers uint) (*metricpb.ResourceMetrics, error) {
-	var ilms []*metricpb.InstrumentationLibraryMetrics
+	var sms []*metricpb.ScopeMetrics
 
 	err := ilmr.ForEach(func(lib instrumentation.Library, mr export.Reader) error {
 
@@ -107,24 +107,24 @@ func InstrumentationLibraryReader(ctx context.Context, temporalitySelector aggre
 			return nil
 		}
 
-		ilms = append(ilms, &metricpb.InstrumentationLibraryMetrics{
+		sms = append(sms, &metricpb.ScopeMetrics{
 			Metrics:   ms,
 			SchemaUrl: lib.SchemaURL,
-			InstrumentationLibrary: &commonpb.InstrumentationLibrary{
+			Scope: &commonpb.InstrumentationScope{
 				Name:    lib.Name,
 				Version: lib.Version,
 			},
 		})
 		return nil
 	})
-	if len(ilms) == 0 {
+	if len(sms) == 0 {
 		return nil, err
 	}
 
 	rms := &metricpb.ResourceMetrics{
-		Resource:                      Resource(res),
-		SchemaUrl:                     res.SchemaURL(),
-		InstrumentationLibraryMetrics: ilms,
+		Resource:     Resource(res),
+		SchemaUrl:    res.SchemaURL(),
+		ScopeMetrics: sms,
 	}
 
 	return rms, err
@@ -196,13 +196,11 @@ func sink(ctx context.Context, in <-chan result) ([]*metricpb.Metric, error) {
 			continue
 
 		}
-		// Note: There is extra work happening in this code
-		// that can be improved when the work described in
-		// #2119 is completed.  The SDK has a guarantee that
-		// no more than one point per period per label set is
-		// produced, so this fallthrough should never happen.
-		// The final step of #2119 is to remove all the
-		// grouping logic here.
+		// Note: There is extra work happening in this code that can be
+		// improved when the work described in #2119 is completed. The SDK has
+		// a guarantee that no more than one point per period per attribute
+		// set is produced, so this fallthrough should never happen. The final
+		// step of #2119 is to remove all the grouping logic here.
 		switch res.Metric.Data.(type) {
 		case *metricpb.Metric_Gauge:
 			m.GetGauge().DataPoints = append(m.GetGauge().DataPoints, res.Metric.GetGauge().DataPoints...)
@@ -275,7 +273,7 @@ func Record(temporalitySelector aggregation.TemporalitySelector, r export.Record
 
 func gaugePoint(record export.Record, num number.Number, start, end time.Time) (*metricpb.Metric, error) {
 	desc := record.Descriptor()
-	labels := record.Labels()
+	attrs := record.Attributes()
 
 	m := &metricpb.Metric{
 		Name:        desc.Name(),
@@ -292,7 +290,7 @@ func gaugePoint(record export.Record, num number.Number, start, end time.Time) (
 						Value: &metricpb.NumberDataPoint_AsInt{
 							AsInt: num.CoerceToInt64(n),
 						},
-						Attributes:        Iterator(labels.Iter()),
+						Attributes:        Iterator(attrs.Iter()),
 						StartTimeUnixNano: toNanos(start),
 						TimeUnixNano:      toNanos(end),
 					},
@@ -307,7 +305,7 @@ func gaugePoint(record export.Record, num number.Number, start, end time.Time) (
 						Value: &metricpb.NumberDataPoint_AsDouble{
 							AsDouble: num.CoerceToFloat64(n),
 						},
-						Attributes:        Iterator(labels.Iter()),
+						Attributes:        Iterator(attrs.Iter()),
 						StartTimeUnixNano: toNanos(start),
 						TimeUnixNano:      toNanos(end),
 					},
@@ -333,7 +331,7 @@ func sdkTemporalityToTemporality(temporality aggregation.Temporality) metricpb.A
 
 func sumPoint(record export.Record, num number.Number, start, end time.Time, temporality aggregation.Temporality, monotonic bool) (*metricpb.Metric, error) {
 	desc := record.Descriptor()
-	labels := record.Labels()
+	attrs := record.Attributes()
 
 	m := &metricpb.Metric{
 		Name:        desc.Name(),
@@ -352,7 +350,7 @@ func sumPoint(record export.Record, num number.Number, start, end time.Time, tem
 						Value: &metricpb.NumberDataPoint_AsInt{
 							AsInt: num.CoerceToInt64(n),
 						},
-						Attributes:        Iterator(labels.Iter()),
+						Attributes:        Iterator(attrs.Iter()),
 						StartTimeUnixNano: toNanos(start),
 						TimeUnixNano:      toNanos(end),
 					},
@@ -369,7 +367,7 @@ func sumPoint(record export.Record, num number.Number, start, end time.Time, tem
 						Value: &metricpb.NumberDataPoint_AsDouble{
 							AsDouble: num.CoerceToFloat64(n),
 						},
-						Attributes:        Iterator(labels.Iter()),
+						Attributes:        Iterator(attrs.Iter()),
 						StartTimeUnixNano: toNanos(start),
 						TimeUnixNano:      toNanos(end),
 					},
@@ -399,7 +397,7 @@ func histogramValues(a aggregation.Histogram) (boundaries []float64, counts []ui
 // histogram transforms a Histogram Aggregator into an OTLP Metric.
 func histogramPoint(record export.Record, temporality aggregation.Temporality, a aggregation.Histogram) (*metricpb.Metric, error) {
 	desc := record.Descriptor()
-	labels := record.Labels()
+	attrs := record.Attributes()
 	boundaries, counts, err := histogramValues(a)
 	if err != nil {
 		return nil, err
@@ -415,6 +413,7 @@ func histogramPoint(record export.Record, temporality aggregation.Temporality, a
 		return nil, err
 	}
 
+	sumFloat64 := sum.CoerceToFloat64(desc.NumberKind())
 	m := &metricpb.Metric{
 		Name:        desc.Name(),
 		Description: desc.Description(),
@@ -424,8 +423,8 @@ func histogramPoint(record export.Record, temporality aggregation.Temporality, a
 				AggregationTemporality: sdkTemporalityToTemporality(temporality),
 				DataPoints: []*metricpb.HistogramDataPoint{
 					{
-						Sum:               sum.CoerceToFloat64(desc.NumberKind()),
-						Attributes:        Iterator(labels.Iter()),
+						Sum:               &sumFloat64,
+						Attributes:        Iterator(attrs.Iter()),
 						StartTimeUnixNano: toNanos(record.StartTime()),
 						TimeUnixNano:      toNanos(record.EndTime()),
 						Count:             uint64(count),

@@ -41,7 +41,7 @@ var (
 	testResource = resource.Empty()
 )
 
-func TestNewExporter_endToEnd(t *testing.T) {
+func TestNewExporterEndToEnd(t *testing.T) {
 	tests := []struct {
 		name           string
 		additionalOpts []otlpmetricgrpc.Option
@@ -93,7 +93,7 @@ func newGRPCExporter(t *testing.T, ctx context.Context, endpoint string, additio
 }
 
 func newExporterEndToEndTest(t *testing.T, additionalOpts []otlpmetricgrpc.Option) {
-	mc := runMockCollectorAtEndpoint(t, "localhost:56561")
+	mc := runMockCollector(t)
 
 	defer func() {
 		_ = mc.stop()
@@ -115,7 +115,7 @@ func newExporterEndToEndTest(t *testing.T, additionalOpts []otlpmetricgrpc.Optio
 }
 
 func TestExporterShutdown(t *testing.T) {
-	mc := runMockCollectorAtEndpoint(t, "localhost:56561")
+	mc := runMockCollector(t)
 	defer func() {
 		_ = mc.Stop()
 	}()
@@ -131,7 +131,7 @@ func TestExporterShutdown(t *testing.T) {
 	})
 }
 
-func TestNewExporter_invokeStartThenStopManyTimes(t *testing.T) {
+func TestNewExporterInvokeStartThenStopManyTimes(t *testing.T) {
 	mc := runMockCollector(t)
 	defer func() {
 		_ = mc.stop()
@@ -163,8 +163,8 @@ func TestNewExporter_invokeStartThenStopManyTimes(t *testing.T) {
 	}
 }
 
-// This test takes a long time to run: to skip it, run tests using: -short
-func TestNewExporter_collectorOnBadConnection(t *testing.T) {
+// This test takes a long time to run: to skip it, run tests using: -short.
+func TestNewExporterCollectorOnBadConnection(t *testing.T) {
 	if testing.Short() {
 		t.Skipf("Skipping this long running test")
 	}
@@ -185,7 +185,7 @@ func TestNewExporter_collectorOnBadConnection(t *testing.T) {
 	_ = exp.Shutdown(ctx)
 }
 
-func TestNewExporter_withEndpoint(t *testing.T) {
+func TestNewExporterWithEndpoint(t *testing.T) {
 	mc := runMockCollector(t)
 	defer func() {
 		_ = mc.stop()
@@ -196,7 +196,7 @@ func TestNewExporter_withEndpoint(t *testing.T) {
 	_ = exp.Shutdown(ctx)
 }
 
-func TestNewExporter_withHeaders(t *testing.T) {
+func TestNewExporterWithHeaders(t *testing.T) {
 	mc := runMockCollector(t)
 	defer func() {
 		_ = mc.stop()
@@ -216,7 +216,7 @@ func TestNewExporter_withHeaders(t *testing.T) {
 	assert.Equal(t, "value1", headers.Get("header1")[0])
 }
 
-func TestNewExporter_WithTimeout(t *testing.T) {
+func TestNewExporterWithTimeout(t *testing.T) {
 	tts := []struct {
 		name    string
 		fn      func(exp *otlpmetric.Exporter) error
@@ -280,18 +280,6 @@ func TestNewExporter_WithTimeout(t *testing.T) {
 	}
 }
 
-func TestStartErrorInvalidSecurityConfiguration(t *testing.T) {
-	mc := runMockCollector(t)
-	defer func() {
-		_ = mc.stop()
-	}()
-
-	client := otlpmetricgrpc.NewClient(otlpmetricgrpc.WithEndpoint(mc.endpoint))
-	err := client.Start(context.Background())
-	// https://github.com/grpc/grpc-go/blob/a671967dfbaab779d37fd7e597d9248f13806087/clientconn.go#L82
-	assert.EqualError(t, err, "grpc: no transport security set (use grpc.WithInsecure() explicitly or set credentials)")
-}
-
 func TestStartErrorInvalidAddress(t *testing.T) {
 	client := otlpmetricgrpc.NewClient(
 		otlpmetricgrpc.WithInsecure(),
@@ -308,7 +296,7 @@ func TestStartErrorInvalidAddress(t *testing.T) {
 }
 
 func TestEmptyData(t *testing.T) {
-	mc := runMockCollectorAtEndpoint(t, "localhost:56561")
+	mc := runMockCollector(t)
 
 	defer func() {
 		_ = mc.stop()
@@ -326,7 +314,7 @@ func TestEmptyData(t *testing.T) {
 }
 
 func TestFailedMetricTransform(t *testing.T) {
-	mc := runMockCollectorAtEndpoint(t, "localhost:56561")
+	mc := runMockCollector(t)
 
 	defer func() {
 		_ = mc.stop()

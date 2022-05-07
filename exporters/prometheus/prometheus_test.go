@@ -26,10 +26,10 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
+	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator/histogram"
 	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
 	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
 	selector "go.opentelemetry.io/otel/sdk/metric/selector/simple"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -107,11 +107,14 @@ func TestPrometheusExporter(t *testing.T) {
 	require.NoError(t, err)
 
 	meter := exporter.MeterProvider().Meter("test")
-	upDownCounter := metric.Must(meter).NewFloat64UpDownCounter("updowncounter")
-	counter := metric.Must(meter).NewFloat64Counter("counter")
-	histogram := metric.Must(meter).NewFloat64Histogram("histogram")
+	upDownCounter, err := meter.SyncFloat64().UpDownCounter("updowncounter")
+	require.NoError(t, err)
+	counter, err := meter.SyncFloat64().Counter("counter")
+	require.NoError(t, err)
+	histogram, err := meter.SyncFloat64().Histogram("histogram")
+	require.NoError(t, err)
 
-	labels := []attribute.KeyValue{
+	attrs := []attribute.KeyValue{
 		attribute.Key("A").String("B"),
 		attribute.Key("C").String("D"),
 	}
@@ -119,21 +122,25 @@ func TestPrometheusExporter(t *testing.T) {
 
 	var expected []expectedMetric
 
-	counter.Add(ctx, 10, labels...)
-	counter.Add(ctx, 5.3, labels...)
+	counter.Add(ctx, 10, attrs...)
+	counter.Add(ctx, 5.3, attrs...)
 
 	expected = append(expected, expectCounter("counter", `counter{A="B",C="D",R="V"} 15.3`))
 
-	_ = metric.Must(meter).NewInt64GaugeObserver("intobserver", func(_ context.Context, result metric.Int64ObserverResult) {
-		result.Observe(1, labels...)
+	gaugeObserver, err := meter.AsyncInt64().Gauge("intgaugeobserver")
+	require.NoError(t, err)
+
+	err = meter.RegisterCallback([]instrument.Asynchronous{gaugeObserver}, func(ctx context.Context) {
+		gaugeObserver.Observe(ctx, 1, attrs...)
 	})
+	require.NoError(t, err)
 
-	expected = append(expected, expectGauge("intobserver", `intobserver{A="B",C="D",R="V"} 1`))
+	expected = append(expected, expectGauge("intgaugeobserver", `intgaugeobserver{A="B",C="D",R="V"} 1`))
 
-	histogram.Record(ctx, -0.6, labels...)
-	histogram.Record(ctx, -0.4, labels...)
-	histogram.Record(ctx, 0.6, labels...)
-	histogram.Record(ctx, 20, labels...)
+	histogram.Record(ctx, -0.6, attrs...)
+	histogram.Record(ctx, -0.4, attrs...)
+	histogram.Record(ctx, 0.6, attrs...)
+	histogram.Record(ctx, 20, attrs...)
 
 	expected = append(expected, expectHistogram("histogram",
 		`histogram_bucket{A="B",C="D",R="V",le="-0.5"} 1`,
@@ -143,10 +150,30 @@ func TestPrometheusExporter(t *testing.T) {
 		`histogram_count{A="B",C="D",R="V"} 4`,
 	))
 
-	upDownCounter.Add(ctx, 10, labels...)
-	upDownCounter.Add(ctx, -3.2, labels...)
+	upDownCounter.Add(ctx, 10, attrs...)
+	upDownCounter.Add(ctx, -3.2, attrs...)
 
 	expected = append(expected, expectGauge("updowncounter", `updowncounter{A="B",C="D",R="V"} 6.8`))
+
+	counterObserver, err := meter.AsyncFloat64().Counter("floatcounterobserver")
+	require.NoError(t, err)
+
+	err = meter.RegisterCallback([]instrument.Asynchronous{counterObserver}, func(ctx context.Context) {
+		counterObserver.Observe(ctx, 7.7, attrs...)
+	})
+	require.NoError(t, err)
+
+	expected = append(expected, expectCounter("floatcounterobserver", `floatcounterobserver{A="B",C="D",R="V"} 7.7`))
+
+	upDownCounterObserver, err := meter.AsyncFloat64().UpDownCounter("floatupdowncounterobserver")
+	require.NoError(t, err)
+
+	err = meter.RegisterCallback([]instrument.Asynchronous{upDownCounterObserver}, func(ctx context.Context) {
+		upDownCounterObserver.Observe(ctx, -7.7, attrs...)
+	})
+	require.NoError(t, err)
+
+	expected = append(expected, expectGauge("floatupdowncounterobserver", `floatupdowncounterobserver{A="B",C="D",R="V"} -7.7`))
 
 	compareExport(t, exporter, expected)
 	compareExport(t, exporter, expected)
@@ -184,10 +211,8 @@ func TestPrometheusStatefulness(t *testing.T) {
 
 	ctx := context.Background()
 
-	counter := metric.Must(meter).NewInt64Counter(
-		"a.counter",
-		metric.WithDescription("Counts things"),
-	)
+	counter, err := meter.SyncInt64().Counter("a.counter", instrument.WithDescription("Counts things"))
+	require.NoError(t, err)
 
 	counter.Add(ctx, 100, attribute.String("key", "value"))
 

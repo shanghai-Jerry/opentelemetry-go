@@ -25,13 +25,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric/metrictest"
-	"go.opentelemetry.io/otel/metric/number"
-	"go.opentelemetry.io/otel/metric/sdkapi"
-	export "go.opentelemetry.io/otel/sdk/export/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/aggregator"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator/lastvalue"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator/sum"
+	"go.opentelemetry.io/otel/sdk/metric/export"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/metrictest"
+	"go.opentelemetry.io/otel/sdk/metric/number"
+	"go.opentelemetry.io/otel/sdk/metric/sdkapi"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 )
@@ -90,20 +91,20 @@ func TestStringKeyValues(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		labels := attribute.NewSet(test.kvs...)
-		assert.Equal(t, test.expected, Iterator(labels.Iter()))
+		attrs := attribute.NewSet(test.kvs...)
+		assert.Equal(t, test.expected, Iterator(attrs.Iter()))
 	}
 }
 
 func TestSumIntDataPoints(t *testing.T) {
 	desc := metrictest.NewDescriptor("", sdkapi.HistogramInstrumentKind, number.Int64Kind)
-	labels := attribute.NewSet(attribute.String("one", "1"))
+	attrs := attribute.NewSet(attribute.String("one", "1"))
 	sums := sum.New(2)
 	s, ckpt := &sums[0], &sums[1]
 
 	assert.NoError(t, s.Update(context.Background(), number.Number(1), &desc))
 	require.NoError(t, s.SynchronizedMove(ckpt, &desc))
-	record := export.NewRecord(&desc, &labels, ckpt.Aggregation(), intervalStart, intervalEnd)
+	record := export.NewRecord(&desc, &attrs, ckpt.Aggregation(), intervalStart, intervalEnd)
 
 	value, err := ckpt.Sum()
 	require.NoError(t, err)
@@ -129,21 +130,18 @@ func TestSumIntDataPoints(t *testing.T) {
 		}, m.GetSum())
 		assert.Nil(t, m.GetHistogram())
 		assert.Nil(t, m.GetSummary())
-		assert.Nil(t, m.GetIntGauge())     // nolint
-		assert.Nil(t, m.GetIntSum())       // nolint
-		assert.Nil(t, m.GetIntHistogram()) // nolint
 	}
 }
 
 func TestSumFloatDataPoints(t *testing.T) {
 	desc := metrictest.NewDescriptor("", sdkapi.HistogramInstrumentKind, number.Float64Kind)
-	labels := attribute.NewSet(attribute.String("one", "1"))
+	attrs := attribute.NewSet(attribute.String("one", "1"))
 	sums := sum.New(2)
 	s, ckpt := &sums[0], &sums[1]
 
 	assert.NoError(t, s.Update(context.Background(), number.NewFloat64Number(1), &desc))
 	require.NoError(t, s.SynchronizedMove(ckpt, &desc))
-	record := export.NewRecord(&desc, &labels, ckpt.Aggregation(), intervalStart, intervalEnd)
+	record := export.NewRecord(&desc, &attrs, ckpt.Aggregation(), intervalStart, intervalEnd)
 	value, err := ckpt.Sum()
 	require.NoError(t, err)
 
@@ -167,21 +165,19 @@ func TestSumFloatDataPoints(t *testing.T) {
 			}}}, m.GetSum())
 		assert.Nil(t, m.GetHistogram())
 		assert.Nil(t, m.GetSummary())
-		assert.Nil(t, m.GetIntGauge())     // nolint
-		assert.Nil(t, m.GetIntSum())       // nolint
-		assert.Nil(t, m.GetIntHistogram()) // nolint
+
 	}
 }
 
 func TestLastValueIntDataPoints(t *testing.T) {
 	desc := metrictest.NewDescriptor("", sdkapi.HistogramInstrumentKind, number.Int64Kind)
-	labels := attribute.NewSet(attribute.String("one", "1"))
+	attrs := attribute.NewSet(attribute.String("one", "1"))
 	lvs := lastvalue.New(2)
 	lv, ckpt := &lvs[0], &lvs[1]
 
 	assert.NoError(t, lv.Update(context.Background(), number.Number(100), &desc))
 	require.NoError(t, lv.SynchronizedMove(ckpt, &desc))
-	record := export.NewRecord(&desc, &labels, ckpt.Aggregation(), intervalStart, intervalEnd)
+	record := export.NewRecord(&desc, &attrs, ckpt.Aggregation(), intervalStart, intervalEnd)
 	value, timestamp, err := ckpt.LastValue()
 	require.NoError(t, err)
 
@@ -202,17 +198,14 @@ func TestLastValueIntDataPoints(t *testing.T) {
 		assert.Nil(t, m.GetSum())
 		assert.Nil(t, m.GetHistogram())
 		assert.Nil(t, m.GetSummary())
-		assert.Nil(t, m.GetIntGauge())     // nolint
-		assert.Nil(t, m.GetIntSum())       // nolint
-		assert.Nil(t, m.GetIntHistogram()) // nolint
 	}
 }
 
 func TestSumErrUnknownValueType(t *testing.T) {
 	desc := metrictest.NewDescriptor("", sdkapi.HistogramInstrumentKind, number.Kind(-1))
-	labels := attribute.NewSet()
+	attrs := attribute.NewSet()
 	s := &sum.New(1)[0]
-	record := export.NewRecord(&desc, &labels, s, intervalStart, intervalEnd)
+	record := export.NewRecord(&desc, &attrs, s, intervalStart, intervalEnd)
 	value, err := s.Sum()
 	require.NoError(t, err)
 
@@ -241,10 +234,10 @@ func (t *testAgg) Aggregation() aggregation.Aggregation {
 func (t *testAgg) Update(ctx context.Context, number number.Number, descriptor *sdkapi.Descriptor) error {
 	return nil
 }
-func (t *testAgg) SynchronizedMove(destination export.Aggregator, descriptor *sdkapi.Descriptor) error {
+func (t *testAgg) SynchronizedMove(destination aggregator.Aggregator, descriptor *sdkapi.Descriptor) error {
 	return nil
 }
-func (t *testAgg) Merge(aggregator export.Aggregator, descriptor *sdkapi.Descriptor) error {
+func (t *testAgg) Merge(aggregator aggregator.Aggregator, descriptor *sdkapi.Descriptor) error {
 	return nil
 }
 
@@ -270,7 +263,7 @@ func (te *testErrSum) Kind() aggregation.Kind {
 	return aggregation.SumKind
 }
 
-var _ export.Aggregator = &testAgg{}
+var _ aggregator.Aggregator = &testAgg{}
 var _ aggregation.Aggregation = &testAgg{}
 var _ aggregation.Sum = &testErrSum{}
 var _ aggregation.LastValue = &testErrLastValue{}
@@ -278,12 +271,12 @@ var _ aggregation.LastValue = &testErrLastValue{}
 func TestRecordAggregatorIncompatibleErrors(t *testing.T) {
 	makeMpb := func(kind aggregation.Kind, agg aggregation.Aggregation) (*metricpb.Metric, error) {
 		desc := metrictest.NewDescriptor("things", sdkapi.CounterInstrumentKind, number.Int64Kind)
-		labels := attribute.NewSet()
+		attrs := attribute.NewSet()
 		test := &testAgg{
 			kind: kind,
 			agg:  agg,
 		}
-		return Record(aggregation.CumulativeTemporalitySelector(), export.NewRecord(&desc, &labels, test, intervalStart, intervalEnd))
+		return Record(aggregation.CumulativeTemporalitySelector(), export.NewRecord(&desc, &attrs, test, intervalStart, intervalEnd))
 	}
 
 	mpb, err := makeMpb(aggregation.SumKind, &lastvalue.New(1)[0])
@@ -302,8 +295,8 @@ func TestRecordAggregatorIncompatibleErrors(t *testing.T) {
 func TestRecordAggregatorUnexpectedErrors(t *testing.T) {
 	makeMpb := func(kind aggregation.Kind, agg aggregation.Aggregation) (*metricpb.Metric, error) {
 		desc := metrictest.NewDescriptor("things", sdkapi.CounterInstrumentKind, number.Int64Kind)
-		labels := attribute.NewSet()
-		return Record(aggregation.CumulativeTemporalitySelector(), export.NewRecord(&desc, &labels, agg, intervalStart, intervalEnd))
+		attrs := attribute.NewSet()
+		return Record(aggregation.CumulativeTemporalitySelector(), export.NewRecord(&desc, &attrs, agg, intervalStart, intervalEnd))
 	}
 
 	errEx := fmt.Errorf("timeout")

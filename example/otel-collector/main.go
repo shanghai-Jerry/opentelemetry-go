@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -31,7 +32,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.10.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -53,7 +54,7 @@ func initProvider() func() {
 	// `localhost:30080` endpoint. Otherwise, replace `localhost` with the
 	// endpoint of your cluster. If you run the app inside k8s, then you can
 	// probably connect directly to the service through dns
-	conn, err := grpc.DialContext(ctx, "localhost:30080", grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.DialContext(ctx, "localhost:30080", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 	handleErr(err, "failed to create gRPC connection to collector")
 
 	// Set up a trace exporter
@@ -87,19 +88,19 @@ func main() {
 
 	tracer := otel.Tracer("test-tracer")
 
-	// labels represent additional key-value descriptors that can be bound to a
-	// metric observer or recorder.
-	commonLabels := []attribute.KeyValue{
-		attribute.String("labelA", "chocolate"),
-		attribute.String("labelB", "raspberry"),
-		attribute.String("labelC", "vanilla"),
+	// Attributes represent additional key-value descriptors that can be bound
+	// to a metric observer or recorder.
+	commonAttrs := []attribute.KeyValue{
+		attribute.String("attrA", "chocolate"),
+		attribute.String("attrB", "raspberry"),
+		attribute.String("attrC", "vanilla"),
 	}
 
 	// work begins
 	ctx, span := tracer.Start(
 		context.Background(),
 		"CollectorExporter-Example",
-		trace.WithAttributes(commonLabels...))
+		trace.WithAttributes(commonAttrs...))
 	defer span.End()
 	for i := 0; i < 10; i++ {
 		_, iSpan := tracer.Start(ctx, fmt.Sprintf("Sample-%d", i))

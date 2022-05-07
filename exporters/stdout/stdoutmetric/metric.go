@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric/sdkapi"
-	exportmetric "go.opentelemetry.io/otel/sdk/export/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
+	"go.opentelemetry.io/otel/sdk/metric/export"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/sdkapi"
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
@@ -33,7 +33,7 @@ type metricExporter struct {
 	config config
 }
 
-var _ exportmetric.Exporter = &metricExporter{}
+var _ export.Exporter = &metricExporter{}
 
 type line struct {
 	Name      string      `json:"Name"`
@@ -49,29 +49,29 @@ func (e *metricExporter) TemporalityFor(desc *sdkapi.Descriptor, kind aggregatio
 	return aggregation.StatelessTemporalitySelector().TemporalityFor(desc, kind)
 }
 
-func (e *metricExporter) Export(_ context.Context, res *resource.Resource, reader exportmetric.InstrumentationLibraryReader) error {
+func (e *metricExporter) Export(_ context.Context, res *resource.Resource, reader export.InstrumentationLibraryReader) error {
 	var aggError error
 	var batch []line
-	aggError = reader.ForEach(func(lib instrumentation.Library, mr exportmetric.Reader) error {
+	aggError = reader.ForEach(func(lib instrumentation.Library, mr export.Reader) error {
 
-		var instLabels []attribute.KeyValue
+		var instAttrs []attribute.KeyValue
 		if name := lib.Name; name != "" {
-			instLabels = append(instLabels, attribute.String("instrumentation.name", name))
+			instAttrs = append(instAttrs, attribute.String("instrumentation.name", name))
 			if version := lib.Version; version != "" {
-				instLabels = append(instLabels, attribute.String("instrumentation.version", version))
+				instAttrs = append(instAttrs, attribute.String("instrumentation.version", version))
 			}
 			if schema := lib.SchemaURL; schema != "" {
-				instLabels = append(instLabels, attribute.String("instrumentation.schema_url", schema))
+				instAttrs = append(instAttrs, attribute.String("instrumentation.schema_url", schema))
 			}
 		}
-		instSet := attribute.NewSet(instLabels...)
-		encodedInstLabels := instSet.Encoded(e.config.LabelEncoder)
+		instSet := attribute.NewSet(instAttrs...)
+		encodedInstAttrs := instSet.Encoded(e.config.Encoder)
 
-		return mr.ForEach(e, func(record exportmetric.Record) error {
+		return mr.ForEach(e, func(record export.Record) error {
 			desc := record.Descriptor()
 			agg := record.Aggregation()
 			kind := desc.NumberKind()
-			encodedResource := res.Encoded(e.config.LabelEncoder)
+			encodedResource := res.Encoded(e.config.Encoder)
 
 			var expose line
 
@@ -93,27 +93,27 @@ func (e *metricExporter) Export(_ context.Context, res *resource.Resource, reade
 				}
 			}
 
-			var encodedLabels string
-			iter := record.Labels().Iter()
+			var encodedAttrs string
+			iter := record.Attributes().Iter()
 			if iter.Len() > 0 {
-				encodedLabels = record.Labels().Encoded(e.config.LabelEncoder)
+				encodedAttrs = record.Attributes().Encoded(e.config.Encoder)
 			}
 
 			var sb strings.Builder
 
 			sb.WriteString(desc.Name())
 
-			if len(encodedLabels) > 0 || len(encodedResource) > 0 || len(encodedInstLabels) > 0 {
+			if len(encodedAttrs) > 0 || len(encodedResource) > 0 || len(encodedInstAttrs) > 0 {
 				sb.WriteRune('{')
 				sb.WriteString(encodedResource)
-				if len(encodedInstLabels) > 0 && len(encodedResource) > 0 {
+				if len(encodedInstAttrs) > 0 && len(encodedResource) > 0 {
 					sb.WriteRune(',')
 				}
-				sb.WriteString(encodedInstLabels)
-				if len(encodedLabels) > 0 && (len(encodedInstLabels) > 0 || len(encodedResource) > 0) {
+				sb.WriteString(encodedInstAttrs)
+				if len(encodedAttrs) > 0 && (len(encodedInstAttrs) > 0 || len(encodedResource) > 0) {
 					sb.WriteRune(',')
 				}
-				sb.WriteString(encodedLabels)
+				sb.WriteString(encodedAttrs)
 				sb.WriteRune('}')
 			}
 

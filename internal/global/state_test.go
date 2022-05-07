@@ -12,36 +12,116 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package global_test
+package global
 
 import (
 	"testing"
 
-	"go.opentelemetry.io/otel/internal/global"
+	"github.com/stretchr/testify/assert"
+
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
-func TestResetsOfGlobalsPanic(t *testing.T) {
-	global.ResetForTest()
-	tests := map[string]func(){
-		"SetTextMapPropagator": func() {
-			global.SetTextMapPropagator(global.TextMapPropagator())
-		},
-		"SetTracerProvider": func() {
-			global.SetTracerProvider(global.TracerProvider())
-		},
-	}
+type nonComparableTracerProvider struct {
+	trace.TracerProvider
 
-	for name, test := range tests {
-		shouldPanic(t, name, test)
-	}
+	nonComparable func() //nolint:structcheck,unused  // This is not called.
 }
 
-func shouldPanic(t *testing.T, name string, f func()) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("calling %s with default global did not panic", name)
-		}
-	}()
+func TestSetTracerProvider(t *testing.T) {
+	t.Run("Set With default is a noop", func(t *testing.T) {
+		ResetForTest(t)
+		SetTracerProvider(TracerProvider())
 
-	f()
+		tp, ok := TracerProvider().(*tracerProvider)
+		if !ok {
+			t.Fatal("Global TracerProvider should be the default tracer provider")
+		}
+
+		if tp.delegate != nil {
+			t.Fatal("tracer provider should not delegate when setting itself")
+		}
+	})
+
+	t.Run("First Set() should replace the delegate", func(t *testing.T) {
+		ResetForTest(t)
+
+		SetTracerProvider(trace.NewNoopTracerProvider())
+
+		_, ok := TracerProvider().(*tracerProvider)
+		if ok {
+			t.Fatal("Global TracerProvider was not changed")
+		}
+	})
+
+	t.Run("Set() should delegate existing TracerProviders", func(t *testing.T) {
+		ResetForTest(t)
+
+		tp := TracerProvider()
+		SetTracerProvider(trace.NewNoopTracerProvider())
+
+		ntp := tp.(*tracerProvider)
+
+		if ntp.delegate == nil {
+			t.Fatal("The delegated tracer providers should have a delegate")
+		}
+	})
+
+	t.Run("non-comparable types should not panic", func(t *testing.T) {
+		ResetForTest(t)
+
+		tp := nonComparableTracerProvider{}
+		SetTracerProvider(tp)
+		assert.NotPanics(t, func() { SetTracerProvider(tp) })
+	})
+}
+
+func TestSetTextMapPropagator(t *testing.T) {
+	t.Run("Set With default is a noop", func(t *testing.T) {
+		ResetForTest(t)
+		SetTextMapPropagator(TextMapPropagator())
+
+		tmp, ok := TextMapPropagator().(*textMapPropagator)
+		if !ok {
+			t.Fatal("Global TextMapPropagator should be the default propagator")
+		}
+
+		if tmp.delegate != nil {
+			t.Fatal("TextMapPropagator should not delegate when setting itself")
+		}
+	})
+
+	t.Run("First Set() should replace the delegate", func(t *testing.T) {
+		ResetForTest(t)
+
+		SetTextMapPropagator(propagation.TraceContext{})
+
+		_, ok := TextMapPropagator().(*textMapPropagator)
+		if ok {
+			t.Fatal("Global TextMapPropagator was not changed")
+		}
+	})
+
+	t.Run("Set() should delegate existing propagators", func(t *testing.T) {
+		ResetForTest(t)
+
+		p := TextMapPropagator()
+		SetTextMapPropagator(propagation.TraceContext{})
+
+		np := p.(*textMapPropagator)
+
+		if np.delegate == nil {
+			t.Fatal("The delegated TextMapPropagators should have a delegate")
+		}
+	})
+
+	t.Run("non-comparable types should not panic", func(t *testing.T) {
+		ResetForTest(t)
+
+		// A composite TextMapPropagator is not comparable.
+		prop := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{})
+		SetTextMapPropagator(prop)
+		assert.NotPanics(t, func() { SetTextMapPropagator(prop) })
+	})
 }

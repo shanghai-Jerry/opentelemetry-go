@@ -37,7 +37,15 @@ const (
 
 // Option applies an option to the HTTP client.
 type Option interface {
-	applyHTTPOption(*otlpconfig.Config)
+	applyHTTPOption(otlpconfig.Config) otlpconfig.Config
+}
+
+func asHTTPOptions(opts []Option) []otlpconfig.HTTPOption {
+	converted := make([]otlpconfig.HTTPOption, len(opts))
+	for i, o := range opts {
+		converted[i] = otlpconfig.NewHTTPOption(o.applyHTTPOption)
+	}
+	return converted
 }
 
 // RetryConfig defines configuration for retrying batches in case of export
@@ -48,15 +56,14 @@ type wrappedOption struct {
 	otlpconfig.HTTPOption
 }
 
-func (w wrappedOption) applyHTTPOption(cfg *otlpconfig.Config) {
-	w.ApplyHTTPOption(cfg)
+func (w wrappedOption) applyHTTPOption(cfg otlpconfig.Config) otlpconfig.Config {
+	return w.ApplyHTTPOption(cfg)
 }
 
-// WithEndpoint allows one to set the address of the collector
-// endpoint that the driver will use to send metrics. If
-// unset, it will instead try to use
-// the default endpoint (localhost:4317). Note that the endpoint
-// must not contain any URL path.
+// WithEndpoint allows one to set the address of the collector endpoint that
+// the driver will use to send metrics. If unset, it will instead try to use
+// the default endpoint (localhost:4318). Note that the endpoint must not
+// contain any URL path.
 func WithEndpoint(endpoint string) Option {
 	return wrappedOption{otlpconfig.WithEndpoint(endpoint)}
 }
@@ -83,7 +90,7 @@ func WithMaxAttempts(maxAttempts int) Option {
 		maxAttempts = 5
 	}
 	return wrappedOption{
-		otlpconfig.NewHTTPOption(func(cfg *otlpconfig.Config) {
+		otlpconfig.NewHTTPOption(func(cfg otlpconfig.Config) otlpconfig.Config {
 			cfg.RetryConfig.Enabled = true
 
 			var (
@@ -104,7 +111,7 @@ func WithMaxAttempts(maxAttempts int) Option {
 			attempts := int64(maxE+init) / int64(maxI)
 
 			if int64(maxAttempts) == attempts {
-				return
+				return cfg
 			}
 
 			maxE = time.Duration(int64(maxAttempts)*int64(maxI)) - init
@@ -112,6 +119,8 @@ func WithMaxAttempts(maxAttempts int) Option {
 			cfg.RetryConfig.InitialInterval = init
 			cfg.RetryConfig.MaxInterval = maxI
 			cfg.RetryConfig.MaxElapsedTime = maxE
+
+			return cfg
 		}),
 	}
 }
@@ -126,7 +135,7 @@ func WithBackoff(duration time.Duration) Option {
 		duration = 300 * time.Millisecond
 	}
 	return wrappedOption{
-		otlpconfig.NewHTTPOption(func(cfg *otlpconfig.Config) {
+		otlpconfig.NewHTTPOption(func(cfg otlpconfig.Config) otlpconfig.Config {
 			cfg.RetryConfig.Enabled = true
 			cfg.RetryConfig.MaxInterval = duration
 			if cfg.RetryConfig.InitialInterval == 0 {
@@ -135,6 +144,7 @@ func WithBackoff(duration time.Duration) Option {
 			if cfg.RetryConfig.MaxElapsedTime == 0 {
 				cfg.RetryConfig.MaxElapsedTime = retry.DefaultConfig.MaxElapsedTime
 			}
+			return cfg
 		}),
 	}
 }

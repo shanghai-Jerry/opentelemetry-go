@@ -44,16 +44,16 @@ func NewApp(r io.Reader, l *log.Logger) *App {
 // Run starts polling users for Fibonacci number requests and writes results.
 func (a *App) Run(ctx context.Context) error {
 	for {
-		var span trace.Span
-		ctx, span = otel.Tracer(name).Start(ctx, "Run")
+		// Each execution of the run loop, we should get a new "root" span and context.
+		newCtx, span := otel.Tracer(name).Start(ctx, "Run")
 
-		n, err := a.Poll(ctx)
+		n, err := a.Poll(newCtx)
 		if err != nil {
 			span.End()
 			return err
 		}
 
-		a.Write(ctx, n)
+		a.Write(newCtx, n)
 		span.End()
 	}
 }
@@ -66,7 +66,7 @@ func (a *App) Poll(ctx context.Context) (uint, error) {
 	a.l.Print("What Fibonacci number would you like to know: ")
 
 	var n uint
-	_, err := fmt.Fscanf(a.r, "%d", &n)
+	_, err := fmt.Fscanf(a.r, "%d\n", &n)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())

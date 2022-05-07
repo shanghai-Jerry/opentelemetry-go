@@ -27,11 +27,10 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-	export "go.opentelemetry.io/otel/sdk/export/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
 	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
 	"go.opentelemetry.io/otel/sdk/metric/controller/controllertest"
+	"go.opentelemetry.io/otel/sdk/metric/export"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
 	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
 	"go.opentelemetry.io/otel/sdk/metric/processor/processortest"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -117,7 +116,8 @@ func TestPushTicker(t *testing.T) {
 
 	ctx := context.Background()
 
-	counter := metric.Must(meter).NewInt64Counter("counter.sum")
+	counter, err := meter.SyncInt64().Counter("counter.sum")
+	require.NoError(t, err)
 
 	require.NoError(t, p.Start(ctx))
 
@@ -197,8 +197,10 @@ func TestPushExportError(t *testing.T) {
 			ctx := context.Background()
 
 			meter := p.Meter("name")
-			counter1 := metric.Must(meter).NewInt64Counter("counter1.sum")
-			counter2 := metric.Must(meter).NewInt64Counter("counter2.sum")
+			counter1, err := meter.SyncInt64().Counter("counter1.sum")
+			require.NoError(t, err)
+			counter2, err := meter.SyncInt64().Counter("counter2.sum")
+			require.NoError(t, err)
 
 			require.NoError(t, p.Start(ctx))
 			runtime.Gosched()

@@ -23,10 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
 	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
 	"go.opentelemetry.io/otel/sdk/metric/controller/controllertest"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
 	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
 	"go.opentelemetry.io/otel/sdk/metric/processor/processortest"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -45,7 +44,8 @@ func TestPullNoCollect(t *testing.T) {
 
 	ctx := context.Background()
 	meter := puller.Meter("nocache")
-	counter := metric.Must(meter).NewInt64Counter("counter.sum")
+	counter, err := meter.SyncInt64().Counter("counter.sum")
+	require.NoError(t, err)
 
 	counter.Add(ctx, 10, attribute.String("A", "B"))
 
@@ -83,7 +83,8 @@ func TestPullWithCollect(t *testing.T) {
 
 	ctx := context.Background()
 	meter := puller.Meter("nocache")
-	counter := metric.Must(meter).NewInt64Counter("counter.sum")
+	counter, err := meter.SyncInt64().Counter("counter.sum")
+	require.NoError(t, err)
 
 	counter.Add(ctx, 10, attribute.String("A", "B"))
 

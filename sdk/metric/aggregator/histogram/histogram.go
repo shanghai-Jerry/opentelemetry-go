@@ -19,11 +19,10 @@ import (
 	"sort"
 	"sync"
 
-	"go.opentelemetry.io/otel/metric/number"
-	"go.opentelemetry.io/otel/metric/sdkapi"
-	export "go.opentelemetry.io/otel/sdk/export/metric"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
+	"go.opentelemetry.io/otel/sdk/metric/number"
+	"go.opentelemetry.io/otel/sdk/metric/sdkapi"
 )
 
 // Note: This code uses a Mutex to govern access to the exclusive
@@ -89,7 +88,7 @@ var defaultFloat64ExplicitBoundaries = []float64{.005, .01, .025, .05, .1, .25, 
 const defaultInt64ExplicitBoundaryMultiplier = 1e6
 
 // defaultInt64ExplicitBoundaries applies a multiplier to the default
-// float64 boundaries: [ 5K, 10K, 25K, ..., 2.5M, 5M, 10M ]
+// float64 boundaries: [ 5K, 10K, 25K, ..., 2.5M, 5M, 10M ].
 var defaultInt64ExplicitBoundaries = func(bounds []float64) (asint []float64) {
 	for _, f := range bounds {
 		asint = append(asint, defaultInt64ExplicitBoundaryMultiplier*f)
@@ -97,7 +96,7 @@ var defaultInt64ExplicitBoundaries = func(bounds []float64) (asint []float64) {
 	return
 }(defaultFloat64ExplicitBoundaries)
 
-var _ export.Aggregator = &Aggregator{}
+var _ aggregator.Aggregator = &Aggregator{}
 var _ aggregation.Sum = &Aggregator{}
 var _ aggregation.Count = &Aggregator{}
 var _ aggregation.Histogram = &Aggregator{}
@@ -174,7 +173,7 @@ func (c *Aggregator) Histogram() (aggregation.Buckets, error) {
 // the empty set.  Since no locks are taken, there is a chance that
 // the independent Sum, Count and Bucket Count are not consistent with each
 // other.
-func (c *Aggregator) SynchronizedMove(oa export.Aggregator, desc *sdkapi.Descriptor) error {
+func (c *Aggregator) SynchronizedMove(oa aggregator.Aggregator, desc *sdkapi.Descriptor) error {
 	o, _ := oa.(*Aggregator)
 
 	if oa != nil && o == nil {
@@ -254,7 +253,7 @@ func (c *Aggregator) Update(_ context.Context, number number.Number, desc *sdkap
 }
 
 // Merge combines two histograms that have the same buckets into a single one.
-func (c *Aggregator) Merge(oa export.Aggregator, desc *sdkapi.Descriptor) error {
+func (c *Aggregator) Merge(oa aggregator.Aggregator, desc *sdkapi.Descriptor) error {
 	o, _ := oa.(*Aggregator)
 	if o == nil {
 		return aggregator.NewInconsistentAggregatorError(c, oa)

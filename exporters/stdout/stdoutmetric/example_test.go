@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/global"
+	"go.opentelemetry.io/otel/metric/instrument/syncint64"
 	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
 	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
 	"go.opentelemetry.io/otel/sdk/metric/selector/simple"
@@ -33,13 +34,8 @@ const (
 )
 
 var (
-	meter = global.GetMeterProvider().Meter(
-		instrumentationName,
-		metric.WithInstrumentationVersion(instrumentationVersion),
-	)
-
-	loopCounter = metric.Must(meter).NewInt64Counter("function.loops")
-	paramValue  = metric.Must(meter).NewInt64Histogram("function.param")
+	loopCounter syncint64.Counter
+	paramValue  syncint64.Histogram
 
 	nameKey = attribute.Key("function.name")
 )
@@ -80,7 +76,18 @@ func InstallExportPipeline(ctx context.Context) func() {
 	if err = pusher.Start(ctx); err != nil {
 		log.Fatalf("starting push controller: %v", err)
 	}
+
 	global.SetMeterProvider(pusher)
+	meter := global.Meter(instrumentationName, metric.WithInstrumentationVersion(instrumentationVersion))
+
+	loopCounter, err = meter.SyncInt64().Counter("function.loops")
+	if err != nil {
+		log.Fatalf("creating instrument: %v", err)
+	}
+	paramValue, err = meter.SyncInt64().Histogram("function.param")
+	if err != nil {
+		log.Fatalf("creating instrument: %v", err)
+	}
 
 	return func() {
 		if err := pusher.Stop(ctx); err != nil {
@@ -92,7 +99,7 @@ func InstallExportPipeline(ctx context.Context) func() {
 func Example() {
 	ctx := context.Background()
 
-	// Registers a meter Provider globally.
+	// TODO: Registers a meter Provider globally.
 	cleanup := InstallExportPipeline(ctx)
 	defer cleanup()
 

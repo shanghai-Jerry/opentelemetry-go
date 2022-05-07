@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"go.opentelemetry.io/otel/exporters/otlp/internal/envconfig"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/internal/otlpconfig"
 )
 
@@ -76,7 +77,11 @@ func TestConfigs(t *testing.T) {
 		{
 			name: "Test default configs",
 			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
-				assert.Equal(t, "localhost:4317", c.Metrics.Endpoint)
+				if grpcOption {
+					assert.Equal(t, "localhost:4317", c.Metrics.Endpoint)
+				} else {
+					assert.Equal(t, "localhost:4318", c.Metrics.Endpoint)
+				}
 				assert.Equal(t, otlpconfig.NoCompression, c.Metrics.Compression)
 				assert.Equal(t, map[string]string(nil), c.Metrics.Headers)
 				assert.Equal(t, 10*time.Second, c.Metrics.Timeout)
@@ -96,20 +101,30 @@ func TestConfigs(t *testing.T) {
 		{
 			name: "Test Environment Endpoint",
 			env: map[string]string{
-				"OTEL_EXPORTER_OTLP_ENDPOINT": "env_endpoint",
+				"OTEL_EXPORTER_OTLP_ENDPOINT": "https://env.endpoint/prefix",
 			},
 			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
-				assert.Equal(t, "env_endpoint", c.Metrics.Endpoint)
+				assert.False(t, c.Metrics.Insecure)
+				if grpcOption {
+					assert.Equal(t, "env.endpoint/prefix", c.Metrics.Endpoint)
+				} else {
+					assert.Equal(t, "env.endpoint", c.Metrics.Endpoint)
+					assert.Equal(t, "/prefix/v1/metrics", c.Metrics.URLPath)
+				}
 			},
 		},
 		{
 			name: "Test Environment Signal Specific Endpoint",
 			env: map[string]string{
-				"OTEL_EXPORTER_OTLP_ENDPOINT":         "overrode_by_signal_specific",
-				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "env_metrics_endpoint",
+				"OTEL_EXPORTER_OTLP_ENDPOINT":         "https://overrode.by.signal.specific/env/var",
+				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "http://env.metrics.endpoint",
 			},
 			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
-				assert.Equal(t, "env_metrics_endpoint", c.Metrics.Endpoint)
+				assert.True(t, c.Metrics.Insecure)
+				assert.Equal(t, "env.metrics.endpoint", c.Metrics.Endpoint)
+				if !grpcOption {
+					assert.Equal(t, "/", c.Metrics.URLPath)
+				}
 			},
 		},
 		{
@@ -155,40 +170,28 @@ func TestConfigs(t *testing.T) {
 			},
 		},
 		{
-			name: "Test Environment Signal Specific Endpoint",
-			env: map[string]string{
-				"OTEL_EXPORTER_OTLP_ENDPOINT":         "http://overrode_by_signal_specific",
-				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "https://env_metrics_endpoint",
-			},
-			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
-				assert.Equal(t, "env_metrics_endpoint", c.Metrics.Endpoint)
-				assert.Equal(t, false, c.Metrics.Insecure)
-			},
-		},
-		{
-			name: "Test Environment Signal Specific Endpoint #2",
-			env: map[string]string{
-				"OTEL_EXPORTER_OTLP_ENDPOINT":         "http://overrode_by_signal_specific",
-				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "env_metrics_endpoint",
-			},
-			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
-				assert.Equal(t, "env_metrics_endpoint", c.Metrics.Endpoint)
-				assert.Equal(t, false, c.Metrics.Insecure)
-			},
-		},
-		{
 			name: "Test Environment Signal Specific Endpoint with uppercase scheme",
 			env: map[string]string{
-				"OTEL_EXPORTER_OTLP_ENDPOINT":         "HTTP://overrode_by_signal_specific",
-				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "env_metrics_endpoint",
+				"OTEL_EXPORTER_OTLP_ENDPOINT":         "HTTPS://overrode_by_signal_specific",
+				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "HtTp://env_metrics_endpoint",
 			},
 			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
 				assert.Equal(t, "env_metrics_endpoint", c.Metrics.Endpoint)
-				assert.Equal(t, false, c.Metrics.Insecure)
+				assert.Equal(t, true, c.Metrics.Insecure)
 			},
 		},
 
 		// Certificate tests
+		{
+			name: "Test Default Certificate",
+			asserts: func(t *testing.T, c *otlpconfig.Config, grpcOption bool) {
+				if grpcOption {
+					assert.NotNil(t, c.Metrics.GRPCCredentials)
+				} else {
+					assert.Nil(t, c.Metrics.TLSCfg)
+				}
+			},
+		},
 		{
 			name: "Test With Certificate",
 			opts: []otlpconfig.GenericOption{
@@ -199,6 +202,7 @@ func TestConfigs(t *testing.T) {
 					//TODO: make sure gRPC's credentials actually works
 					assert.NotNil(t, c.Metrics.GRPCCredentials)
 				} else {
+					// nolint:staticcheck // ignoring tlsCert.RootCAs.Subjects is deprecated ERR because cert does not come from SystemCertPool.
 					assert.Equal(t, tlsCert.RootCAs.Subjects(), c.Metrics.TLSCfg.RootCAs.Subjects())
 				}
 			},
@@ -215,6 +219,7 @@ func TestConfigs(t *testing.T) {
 				if grpcOption {
 					assert.NotNil(t, c.Metrics.GRPCCredentials)
 				} else {
+					// nolint:staticcheck // ignoring tlsCert.RootCAs.Subjects is deprecated ERR because cert does not come from SystemCertPool.
 					assert.Equal(t, tlsCert.RootCAs.Subjects(), c.Metrics.TLSCfg.RootCAs.Subjects())
 				}
 			},
@@ -233,6 +238,7 @@ func TestConfigs(t *testing.T) {
 				if grpcOption {
 					assert.NotNil(t, c.Metrics.GRPCCredentials)
 				} else {
+					// nolint:staticcheck // ignoring tlsCert.RootCAs.Subjects is deprecated ERR because cert does not come from SystemCertPool.
 					assert.Equal(t, tlsCert.RootCAs.Subjects(), c.Metrics.TLSCfg.RootCAs.Subjects())
 				}
 			},
@@ -250,6 +256,7 @@ func TestConfigs(t *testing.T) {
 				if grpcOption {
 					assert.NotNil(t, c.Metrics.GRPCCredentials)
 				} else {
+					// nolint:staticcheck // ignoring tlsCert.RootCAs.Subjects is deprecated ERR because cert does not come from SystemCertPool.
 					assert.Equal(t, 1, len(c.Metrics.TLSCfg.RootCAs.Subjects()))
 				}
 			},
@@ -380,27 +387,37 @@ func TestConfigs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
-			e := otlpconfig.EnvOptionsReader{
-				GetEnv:   tt.env.getEnv,
-				ReadFile: tt.fileReader.readFile,
+			origEOR := otlpconfig.DefaultEnvOptionsReader
+			otlpconfig.DefaultEnvOptionsReader = envconfig.EnvOptionsReader{
+				GetEnv:    tt.env.getEnv,
+				ReadFile:  tt.fileReader.readFile,
+				Namespace: "OTEL_EXPORTER_OTLP",
 			}
+			t.Cleanup(func() { otlpconfig.DefaultEnvOptionsReader = origEOR })
 
 			// Tests Generic options as HTTP Options
-			cfg := otlpconfig.NewDefaultConfig()
-			e.ApplyHTTPEnvConfigs(&cfg)
-			for _, opt := range tt.opts {
-				opt.ApplyHTTPOption(&cfg)
-			}
+			cfg := otlpconfig.NewHTTPConfig(asHTTPOptions(tt.opts)...)
 			tt.asserts(t, &cfg, false)
 
 			// Tests Generic options as gRPC Options
-			cfg = otlpconfig.NewDefaultConfig()
-			e.ApplyGRPCEnvConfigs(&cfg)
-			for _, opt := range tt.opts {
-				opt.ApplyGRPCOption(&cfg)
-			}
+			cfg = otlpconfig.NewGRPCConfig(asGRPCOptions(tt.opts)...)
 			tt.asserts(t, &cfg, true)
 		})
 	}
+}
+
+func asHTTPOptions(opts []otlpconfig.GenericOption) []otlpconfig.HTTPOption {
+	converted := make([]otlpconfig.HTTPOption, len(opts))
+	for i, o := range opts {
+		converted[i] = otlpconfig.NewHTTPOption(o.ApplyHTTPOption)
+	}
+	return converted
+}
+
+func asGRPCOptions(opts []otlpconfig.GenericOption) []otlpconfig.GRPCOption {
+	converted := make([]otlpconfig.GRPCOption, len(opts))
+	for i, o := range opts {
+		converted[i] = otlpconfig.NewGRPCOption(o.ApplyGRPCOption)
+	}
+	return converted
 }

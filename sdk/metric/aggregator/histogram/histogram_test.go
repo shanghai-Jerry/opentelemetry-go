@@ -23,11 +23,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"go.opentelemetry.io/otel/metric/number"
-	"go.opentelemetry.io/otel/metric/sdkapi"
-	export "go.opentelemetry.io/otel/sdk/export/metric"
+	"go.opentelemetry.io/otel/sdk/metric/aggregator"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator/aggregatortest"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator/histogram"
+	"go.opentelemetry.io/otel/sdk/metric/number"
+	"go.opentelemetry.io/otel/sdk/metric/sdkapi"
 )
 
 const count = 100
@@ -109,7 +109,7 @@ func TestHistogramPositiveAndNegative(t *testing.T) {
 	})
 }
 
-// Validates count, sum and buckets for a given profile and policy
+// Validates count, sum and buckets for a given profile and policy.
 func testHistogram(t *testing.T, profile aggregatortest.Profile, policy policy) {
 	descriptor := aggregatortest.NewAggregatorTest(sdkapi.HistogramInstrumentKind, profile.NumberKind)
 
@@ -240,7 +240,7 @@ func TestSynchronizedMoveReset(t *testing.T) {
 	aggregatortest.SynchronizedMoveResetTest(
 		t,
 		sdkapi.HistogramInstrumentKind,
-		func(desc *sdkapi.Descriptor) export.Aggregator {
+		func(desc *sdkapi.Descriptor) aggregator.Aggregator {
 			return &histogram.New(1, desc, histogram.WithExplicitBoundaries(testBoundaries))[0]
 		},
 	)

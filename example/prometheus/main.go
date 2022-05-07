@@ -24,11 +24,11 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/global"
-	"go.opentelemetry.io/otel/sdk/export/metric/aggregation"
+	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/sdk/metric/aggregator/histogram"
 	controller "go.opentelemetry.io/otel/sdk/metric/controller/basic"
+	"go.opentelemetry.io/otel/sdk/metric/export/aggregation"
 	processor "go.opentelemetry.io/otel/sdk/metric/processor/basic"
 	selector "go.opentelemetry.io/otel/sdk/metric/selector/simple"
 )
@@ -38,7 +38,9 @@ var (
 )
 
 func initMeter() {
-	config := prometheus.Config{}
+	config := prometheus.Config{
+		DefaultHistogramBoundaries: []float64{1, 2, 5, 10, 20, 50},
+	}
 	c := controller.New(
 		processor.NewFactory(
 			selector.NewWithHistogramDistribution(
@@ -52,6 +54,7 @@ func initMeter() {
 	if err != nil {
 		log.Panicf("failed to initialize prometheus exporter %v", err)
 	}
+
 	global.SetMeterProvider(exporter.MeterProvider())
 
 	http.HandleFunc("/", exporter.ServeHTTP)
@@ -66,64 +69,62 @@ func main() {
 	initMeter()
 
 	meter := global.Meter("ex.com/basic")
+
 	observerLock := new(sync.RWMutex)
 	observerValueToReport := new(float64)
-	observerLabelsToReport := new([]attribute.KeyValue)
-	cb := func(_ context.Context, result metric.Float64ObserverResult) {
+	observerAttrsToReport := new([]attribute.KeyValue)
+
+	gaugeObserver, err := meter.AsyncFloat64().Gauge("ex.com.one")
+	if err != nil {
+		log.Panicf("failed to initialize instrument: %v", err)
+	}
+	_ = meter.RegisterCallback([]instrument.Asynchronous{gaugeObserver}, func(ctx context.Context) {
 		(*observerLock).RLock()
 		value := *observerValueToReport
-		labels := *observerLabelsToReport
+		attrs := *observerAttrsToReport
 		(*observerLock).RUnlock()
-		result.Observe(value, labels...)
+		gaugeObserver.Observe(ctx, value, attrs...)
+	})
+
+	histogram, err := meter.SyncFloat64().Histogram("ex.com.two")
+	if err != nil {
+		log.Panicf("failed to initialize instrument: %v", err)
 	}
-	_ = metric.Must(meter).NewFloat64GaugeObserver("ex.com.one", cb,
-		metric.WithDescription("A GaugeObserver set to 1.0"),
-	)
+	counter, err := meter.SyncFloat64().Counter("ex.com.three")
+	if err != nil {
+		log.Panicf("failed to initialize instrument: %v", err)
+	}
 
-	histogram := metric.Must(meter).NewFloat64Histogram("ex.com.two")
-	counter := metric.Must(meter).NewFloat64Counter("ex.com.three")
-
-	commonLabels := []attribute.KeyValue{lemonsKey.Int(10), attribute.String("A", "1"), attribute.String("B", "2"), attribute.String("C", "3")}
-	notSoCommonLabels := []attribute.KeyValue{lemonsKey.Int(13)}
+	commonAttrs := []attribute.KeyValue{lemonsKey.Int(10), attribute.String("A", "1"), attribute.String("B", "2"), attribute.String("C", "3")}
+	notSoCommonAttrs := []attribute.KeyValue{lemonsKey.Int(13)}
 
 	ctx := context.Background()
 
 	(*observerLock).Lock()
 	*observerValueToReport = 1.0
-	*observerLabelsToReport = commonLabels
+	*observerAttrsToReport = commonAttrs
 	(*observerLock).Unlock()
-	meter.RecordBatch(
-		ctx,
-		commonLabels,
-		histogram.Measurement(2.0),
-		counter.Measurement(12.0),
-	)
+
+	histogram.Record(ctx, 2.0, commonAttrs...)
+	counter.Add(ctx, 12.0, commonAttrs...)
 
 	time.Sleep(5 * time.Second)
 
 	(*observerLock).Lock()
 	*observerValueToReport = 1.0
-	*observerLabelsToReport = notSoCommonLabels
+	*observerAttrsToReport = notSoCommonAttrs
 	(*observerLock).Unlock()
-	meter.RecordBatch(
-		ctx,
-		notSoCommonLabels,
-		histogram.Measurement(2.0),
-		counter.Measurement(22.0),
-	)
+	histogram.Record(ctx, 2.0, notSoCommonAttrs...)
+	counter.Add(ctx, 22.0, notSoCommonAttrs...)
 
 	time.Sleep(5 * time.Second)
 
 	(*observerLock).Lock()
 	*observerValueToReport = 13.0
-	*observerLabelsToReport = commonLabels
+	*observerAttrsToReport = commonAttrs
 	(*observerLock).Unlock()
-	meter.RecordBatch(
-		ctx,
-		commonLabels,
-		histogram.Measurement(12.0),
-		counter.Measurement(13.0),
-	)
+	histogram.Record(ctx, 12.0, commonAttrs...)
+	counter.Add(ctx, 13.0, commonAttrs...)
 
 	fmt.Println("Example finished updating, please visit :2222")
 

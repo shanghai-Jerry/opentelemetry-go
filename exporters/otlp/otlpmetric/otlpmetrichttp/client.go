@@ -23,9 +23,8 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"path"
+	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -76,26 +75,7 @@ type client struct {
 
 // NewClient creates a new HTTP metric client.
 func NewClient(opts ...Option) otlpmetric.Client {
-	cfg := otlpconfig.NewDefaultConfig()
-	otlpconfig.ApplyHTTPEnvConfigs(&cfg)
-	for _, opt := range opts {
-		opt.applyHTTPOption(&cfg)
-	}
-
-	for pathPtr, defaultPath := range map[*string]string{
-		&cfg.Metrics.URLPath: otlpconfig.DefaultMetricsPath,
-	} {
-		tmp := strings.TrimSpace(*pathPtr)
-		if tmp == "" {
-			tmp = defaultPath
-		} else {
-			tmp = path.Clean(tmp)
-			if !path.IsAbs(tmp) {
-				tmp = fmt.Sprintf("/%s", tmp)
-			}
-		}
-		*pathPtr = tmp
-	}
+	cfg := otlpconfig.NewHTTPConfig(asHTTPOptions(opts)...)
 
 	httpClient := &http.Client{
 		Transport: ourTransport,
@@ -118,7 +98,7 @@ func NewClient(opts ...Option) otlpmetric.Client {
 	}
 }
 
-// Start does nothing in a HTTP client
+// Start does nothing in a HTTP client.
 func (d *client) Start(ctx context.Context) error {
 	// nothing to do
 	select {
@@ -143,9 +123,9 @@ func (d *client) Stop(ctx context.Context) error {
 }
 
 // UploadMetrics sends a batch of metrics to the collector.
-func (d *client) UploadMetrics(ctx context.Context, protoMetrics []*metricpb.ResourceMetrics) error {
+func (d *client) UploadMetrics(ctx context.Context, protoMetrics *metricpb.ResourceMetrics) error {
 	pbRequest := &colmetricpb.ExportMetricsServiceRequest{
-		ResourceMetrics: protoMetrics,
+		ResourceMetrics: []*metricpb.ResourceMetrics{protoMetrics},
 	}
 	rawRequest, err := proto.Marshal(pbRequest)
 	if err != nil {
@@ -199,8 +179,8 @@ func (d *client) UploadMetrics(ctx context.Context, protoMetrics []*metricpb.Res
 }
 
 func (d *client) newRequest(body []byte) (request, error) {
-	address := fmt.Sprintf("%s://%s%s", d.getScheme(), d.cfg.Endpoint, d.cfg.URLPath)
-	r, err := http.NewRequest(http.MethodPost, address, nil)
+	u := url.URL{Scheme: d.getScheme(), Host: d.cfg.Endpoint, Path: d.cfg.URLPath}
+	r, err := http.NewRequest(http.MethodPost, u.String(), nil)
 	if err != nil {
 		return request{Request: r}, err
 	}

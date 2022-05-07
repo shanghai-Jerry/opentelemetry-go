@@ -22,10 +22,10 @@ import (
 )
 
 var (
-	defaultWriter       = os.Stdout
-	defaultPrettyPrint  = false
-	defaultTimestamps   = true
-	defaultLabelEncoder = attribute.DefaultEncoder()
+	defaultWriter      = os.Stdout
+	defaultPrettyPrint = false
+	defaultTimestamps  = true
+	defaultAttrEncoder = attribute.DefaultEncoder()
 )
 
 // config contains options for the STDOUT exporter.
@@ -41,20 +41,20 @@ type config struct {
 	// true.
 	Timestamps bool
 
-	// LabelEncoder encodes the labels.
-	LabelEncoder attribute.Encoder
+	// Encoder encodes the attributes.
+	Encoder attribute.Encoder
 }
 
 // newConfig creates a validated Config configured with options.
 func newConfig(options ...Option) (config, error) {
 	cfg := config{
-		Writer:       defaultWriter,
-		PrettyPrint:  defaultPrettyPrint,
-		Timestamps:   defaultTimestamps,
-		LabelEncoder: defaultLabelEncoder,
+		Writer:      defaultWriter,
+		PrettyPrint: defaultPrettyPrint,
+		Timestamps:  defaultTimestamps,
+		Encoder:     defaultAttrEncoder,
 	}
 	for _, opt := range options {
-		opt.apply(&cfg)
+		cfg = opt.apply(cfg)
 
 	}
 	return cfg, nil
@@ -62,7 +62,7 @@ func newConfig(options ...Option) (config, error) {
 
 // Option sets the value of an option for a Config.
 type Option interface {
-	apply(*config)
+	apply(config) config
 }
 
 // WithWriter sets the export stream destination.
@@ -74,8 +74,9 @@ type writerOption struct {
 	W io.Writer
 }
 
-func (o writerOption) apply(cfg *config) {
+func (o writerOption) apply(cfg config) config {
 	cfg.Writer = o.W
+	return cfg
 }
 
 // WithPrettyPrint sets the export stream format to use JSON.
@@ -85,8 +86,9 @@ func WithPrettyPrint() Option {
 
 type prettyPrintOption bool
 
-func (o prettyPrintOption) apply(cfg *config) {
+func (o prettyPrintOption) apply(cfg config) config {
 	cfg.PrettyPrint = bool(o)
+	return cfg
 }
 
 // WithoutTimestamps sets the export stream to not include timestamps.
@@ -96,19 +98,21 @@ func WithoutTimestamps() Option {
 
 type timestampsOption bool
 
-func (o timestampsOption) apply(cfg *config) {
+func (o timestampsOption) apply(cfg config) config {
 	cfg.Timestamps = bool(o)
+	return cfg
 }
 
-// WithLabelEncoder sets the label encoder used in export.
-func WithLabelEncoder(enc attribute.Encoder) Option {
-	return labelEncoderOption{enc}
+// WithAttributeEncoder sets the attribute encoder used in export.
+func WithAttributeEncoder(enc attribute.Encoder) Option {
+	return attrEncoderOption{enc}
 }
 
-type labelEncoderOption struct {
-	LabelEncoder attribute.Encoder
+type attrEncoderOption struct {
+	encoder attribute.Encoder
 }
 
-func (o labelEncoderOption) apply(cfg *config) {
-	cfg.LabelEncoder = o.LabelEncoder
+func (o attrEncoderOption) apply(cfg config) config {
+	cfg.Encoder = o.encoder
+	return cfg
 }
